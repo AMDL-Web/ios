@@ -1,0 +1,925 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2E6E64012FF8AB6C005A8B28 /* DownloadLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2E6E64002FF8AB6C005A8B28 /* DownloadLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		2E6E65072FF8AB6C005A8B28 /* ShareDownloadExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2E6E65002FF8AB6C005A8B28 /* ShareDownloadExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		2E6E63152FF8AB6C005A8B28 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2E6E62FB2FF8AB6A005A8B28 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2E6E63022FF8AB6A005A8B28;
+			remoteInfo = "amdl-ios";
+		};
+		2E6E631F2FF8AB6C005A8B28 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2E6E62FB2FF8AB6A005A8B28 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2E6E63022FF8AB6A005A8B28;
+			remoteInfo = "amdl-ios";
+		};
+		2E6E640C2FF8AB6C005A8B28 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2E6E62FB2FF8AB6A005A8B28 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2E6E64082FF8AB6C005A8B28;
+			remoteInfo = DownloadLiveActivity;
+		};
+		2E6E65082FF8AB6C005A8B28 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2E6E62FB2FF8AB6A005A8B28 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2E6E65062FF8AB6C005A8B28;
+			remoteInfo = ShareDownloadExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		2E6E640B2FF8AB6C005A8B28 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				2E6E64012FF8AB6C005A8B28 /* DownloadLiveActivity.appex in Embed Foundation Extensions */,
+				2E6E65072FF8AB6C005A8B28 /* ShareDownloadExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		2E6E63032FF8AB6A005A8B28 /* amdl-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "amdl-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		2E6E63142FF8AB6C005A8B28 /* amdl-iosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "amdl-iosTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		2E6E631E2FF8AB6C005A8B28 /* amdl-iosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "amdl-iosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		2E6E64002FF8AB6C005A8B28 /* DownloadLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DownloadLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		2E6E65002FF8AB6C005A8B28 /* ShareDownloadExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareDownloadExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		2E6E63262FF8AB6C005A8B28 /* Exceptions for "amdl-ios" folder in "amdl-ios" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2E6E63022FF8AB6A005A8B28 /* amdl-ios */;
+		};
+		2E6E64042FF8AB6C005A8B28 /* Exceptions for "DownloadLiveActivity" folder in "DownloadLiveActivity" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2E6E64082FF8AB6C005A8B28 /* DownloadLiveActivity */;
+		};
+		2E6E65022FF8AB6C005A8B28 /* Exceptions for "ShareDownloadExtension" folder in "ShareDownloadExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2E6E65062FF8AB6C005A8B28 /* ShareDownloadExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		2E6E63052FF8AB6A005A8B28 /* amdl-ios */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2E6E63262FF8AB6C005A8B28 /* Exceptions for "amdl-ios" folder in "amdl-ios" target */,
+			);
+			path = "amdl-ios";
+			sourceTree = "<group>";
+		};
+		2E6E63172FF8AB6C005A8B28 /* amdl-iosTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "amdl-iosTests";
+			sourceTree = "<group>";
+		};
+		2E6E63212FF8AB6C005A8B28 /* amdl-iosUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "amdl-iosUITests";
+			sourceTree = "<group>";
+		};
+		2E6E64022FF8AB6C005A8B28 /* DownloadLiveActivity */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2E6E64042FF8AB6C005A8B28 /* Exceptions for "DownloadLiveActivity" folder in "DownloadLiveActivity" target */,
+			);
+			path = DownloadLiveActivity;
+			sourceTree = "<group>";
+		};
+		2E6E64032FF8AB6C005A8B28 /* LiveActivityShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LiveActivityShared;
+			sourceTree = "<group>";
+		};
+		2E6E65012FF8AB6C005A8B28 /* ShareDownloadExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2E6E65022FF8AB6C005A8B28 /* Exceptions for "ShareDownloadExtension" folder in "ShareDownloadExtension" target */,
+			);
+			path = ShareDownloadExtension;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2E6E63002FF8AB6A005A8B28 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E63112FF8AB6C005A8B28 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E631B2FF8AB6C005A8B28 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E64052FF8AB6C005A8B28 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E65032FF8AB6C005A8B28 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2E6E62FA2FF8AB6A005A8B28 = {
+			isa = PBXGroup;
+			children = (
+				2E6E63052FF8AB6A005A8B28 /* amdl-ios */,
+				2E6E64022FF8AB6C005A8B28 /* DownloadLiveActivity */,
+				2E6E65012FF8AB6C005A8B28 /* ShareDownloadExtension */,
+				2E6E64032FF8AB6C005A8B28 /* LiveActivityShared */,
+				2E6E63172FF8AB6C005A8B28 /* amdl-iosTests */,
+				2E6E63212FF8AB6C005A8B28 /* amdl-iosUITests */,
+				2E6E63042FF8AB6A005A8B28 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		2E6E63042FF8AB6A005A8B28 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				2E6E63032FF8AB6A005A8B28 /* amdl-ios.app */,
+				2E6E64002FF8AB6C005A8B28 /* DownloadLiveActivity.appex */,
+				2E6E65002FF8AB6C005A8B28 /* ShareDownloadExtension.appex */,
+				2E6E63142FF8AB6C005A8B28 /* amdl-iosTests.xctest */,
+				2E6E631E2FF8AB6C005A8B28 /* amdl-iosUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2E6E63022FF8AB6A005A8B28 /* amdl-ios */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2E6E63272FF8AB6C005A8B28 /* Build configuration list for PBXNativeTarget "amdl-ios" */;
+			buildPhases = (
+				2E6E62FF2FF8AB6A005A8B28 /* Sources */,
+				2E6E63002FF8AB6A005A8B28 /* Frameworks */,
+				2E6E63012FF8AB6A005A8B28 /* Resources */,
+				2E6E640B2FF8AB6C005A8B28 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2E6E640D2FF8AB6C005A8B28 /* PBXTargetDependency */,
+				2E6E65092FF8AB6C005A8B28 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				2E6E63052FF8AB6A005A8B28 /* amdl-ios */,
+				2E6E64032FF8AB6C005A8B28 /* LiveActivityShared */,
+			);
+			name = "amdl-ios";
+			packageProductDependencies = (
+			);
+			productName = "amdl-ios";
+			productReference = 2E6E63032FF8AB6A005A8B28 /* amdl-ios.app */;
+			productType = "com.apple.product-type.application";
+		};
+		2E6E63132FF8AB6C005A8B28 /* amdl-iosTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2E6E632C2FF8AB6C005A8B28 /* Build configuration list for PBXNativeTarget "amdl-iosTests" */;
+			buildPhases = (
+				2E6E63102FF8AB6C005A8B28 /* Sources */,
+				2E6E63112FF8AB6C005A8B28 /* Frameworks */,
+				2E6E63122FF8AB6C005A8B28 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2E6E63162FF8AB6C005A8B28 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				2E6E63172FF8AB6C005A8B28 /* amdl-iosTests */,
+			);
+			name = "amdl-iosTests";
+			packageProductDependencies = (
+			);
+			productName = "amdl-iosTests";
+			productReference = 2E6E63142FF8AB6C005A8B28 /* amdl-iosTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		2E6E631D2FF8AB6C005A8B28 /* amdl-iosUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2E6E632F2FF8AB6C005A8B28 /* Build configuration list for PBXNativeTarget "amdl-iosUITests" */;
+			buildPhases = (
+				2E6E631A2FF8AB6C005A8B28 /* Sources */,
+				2E6E631B2FF8AB6C005A8B28 /* Frameworks */,
+				2E6E631C2FF8AB6C005A8B28 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2E6E63202FF8AB6C005A8B28 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				2E6E63212FF8AB6C005A8B28 /* amdl-iosUITests */,
+			);
+			name = "amdl-iosUITests";
+			packageProductDependencies = (
+			);
+			productName = "amdl-iosUITests";
+			productReference = 2E6E631E2FF8AB6C005A8B28 /* amdl-iosUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		2E6E64082FF8AB6C005A8B28 /* DownloadLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2E6E64102FF8AB6C005A8B28 /* Build configuration list for PBXNativeTarget "DownloadLiveActivity" */;
+			buildPhases = (
+				2E6E64062FF8AB6C005A8B28 /* Sources */,
+				2E6E64052FF8AB6C005A8B28 /* Frameworks */,
+				2E6E64072FF8AB6C005A8B28 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				2E6E64022FF8AB6C005A8B28 /* DownloadLiveActivity */,
+				2E6E64032FF8AB6C005A8B28 /* LiveActivityShared */,
+			);
+			name = DownloadLiveActivity;
+			packageProductDependencies = (
+			);
+			productName = DownloadLiveActivity;
+			productReference = 2E6E64002FF8AB6C005A8B28 /* DownloadLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		2E6E65062FF8AB6C005A8B28 /* ShareDownloadExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2E6E650C2FF8AB6C005A8B28 /* Build configuration list for PBXNativeTarget "ShareDownloadExtension" */;
+			buildPhases = (
+				2E6E65042FF8AB6C005A8B28 /* Sources */,
+				2E6E65032FF8AB6C005A8B28 /* Frameworks */,
+				2E6E65052FF8AB6C005A8B28 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				2E6E65012FF8AB6C005A8B28 /* ShareDownloadExtension */,
+			);
+			name = ShareDownloadExtension;
+			packageProductDependencies = (
+			);
+			productName = ShareDownloadExtension;
+			productReference = 2E6E65002FF8AB6C005A8B28 /* ShareDownloadExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		2E6E62FB2FF8AB6A005A8B28 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2640;
+				LastUpgradeCheck = 2640;
+				TargetAttributes = {
+					2E6E63022FF8AB6A005A8B28 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+					2E6E63132FF8AB6C005A8B28 = {
+						CreatedOnToolsVersion = 26.4.1;
+						TestTargetID = 2E6E63022FF8AB6A005A8B28;
+					};
+					2E6E631D2FF8AB6C005A8B28 = {
+						CreatedOnToolsVersion = 26.4.1;
+						TestTargetID = 2E6E63022FF8AB6A005A8B28;
+					};
+					2E6E64082FF8AB6C005A8B28 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+					2E6E65062FF8AB6C005A8B28 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+				};
+			};
+			buildConfigurationList = 2E6E62FE2FF8AB6A005A8B28 /* Build configuration list for PBXProject "amdl-ios" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 2E6E62FA2FF8AB6A005A8B28;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 2E6E63042FF8AB6A005A8B28 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2E6E63022FF8AB6A005A8B28 /* amdl-ios */,
+				2E6E64082FF8AB6C005A8B28 /* DownloadLiveActivity */,
+				2E6E65062FF8AB6C005A8B28 /* ShareDownloadExtension */,
+				2E6E63132FF8AB6C005A8B28 /* amdl-iosTests */,
+				2E6E631D2FF8AB6C005A8B28 /* amdl-iosUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		2E6E63012FF8AB6A005A8B28 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E63122FF8AB6C005A8B28 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E631C2FF8AB6C005A8B28 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E64072FF8AB6C005A8B28 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E65052FF8AB6C005A8B28 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		2E6E62FF2FF8AB6A005A8B28 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E63102FF8AB6C005A8B28 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E631A2FF8AB6C005A8B28 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E64062FF8AB6C005A8B28 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2E6E65042FF8AB6C005A8B28 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		2E6E63162FF8AB6C005A8B28 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2E6E63022FF8AB6A005A8B28 /* amdl-ios */;
+			targetProxy = 2E6E63152FF8AB6C005A8B28 /* PBXContainerItemProxy */;
+		};
+		2E6E63202FF8AB6C005A8B28 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2E6E63022FF8AB6A005A8B28 /* amdl-ios */;
+			targetProxy = 2E6E631F2FF8AB6C005A8B28 /* PBXContainerItemProxy */;
+		};
+		2E6E640D2FF8AB6C005A8B28 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2E6E64082FF8AB6C005A8B28 /* DownloadLiveActivity */;
+			targetProxy = 2E6E640C2FF8AB6C005A8B28 /* PBXContainerItemProxy */;
+		};
+		2E6E65092FF8AB6C005A8B28 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2E6E65062FF8AB6C005A8B28 /* ShareDownloadExtension */;
+			targetProxy = 2E6E65082FF8AB6C005A8B28 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		2E6E63282FF8AB6C005A8B28 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "amdl-ios/amdl_ios.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "amdl-ios/Info.plist";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-ios";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		2E6E63292FF8AB6C005A8B28 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "amdl-ios/amdl_ios.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "amdl-ios/Info.plist";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-ios";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2E6E632A2FF8AB6C005A8B28 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		2E6E632B2FF8AB6C005A8B28 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		2E6E632D2FF8AB6C005A8B28 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-iosTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/amdl-ios.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/amdl-ios";
+			};
+			name = Debug;
+		};
+		2E6E632E2FF8AB6C005A8B28 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-iosTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/amdl-ios.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/amdl-ios";
+			};
+			name = Release;
+		};
+		2E6E63302FF8AB6C005A8B28 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-iosUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "amdl-ios";
+			};
+			name = Debug;
+		};
+		2E6E63312FF8AB6C005A8B28 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-iosUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "amdl-ios";
+			};
+			name = Release;
+		};
+		2E6E640E2FF8AB6C005A8B28 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = DownloadLiveActivity/DownloadLiveActivity.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DownloadLiveActivity/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "AMDL 下载";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-ios.DownloadLiveActivity";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		2E6E640F2FF8AB6C005A8B28 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = DownloadLiveActivity/DownloadLiveActivity.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DownloadLiveActivity/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "AMDL 下载";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-ios.DownloadLiveActivity";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2E6E650A2FF8AB6C005A8B28 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareDownloadExtension/ShareDownloadExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ShareDownloadExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "发送到 AMDL";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-ios.ShareDownloadExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		2E6E650B2FF8AB6C005A8B28 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = ShareDownloadExtension/ShareDownloadExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ShareDownloadExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "发送到 AMDL";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-ios.ShareDownloadExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2E6E62FE2FF8AB6A005A8B28 /* Build configuration list for PBXProject "amdl-ios" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2E6E632A2FF8AB6C005A8B28 /* Debug */,
+				2E6E632B2FF8AB6C005A8B28 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2E6E63272FF8AB6C005A8B28 /* Build configuration list for PBXNativeTarget "amdl-ios" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2E6E63282FF8AB6C005A8B28 /* Debug */,
+				2E6E63292FF8AB6C005A8B28 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2E6E632C2FF8AB6C005A8B28 /* Build configuration list for PBXNativeTarget "amdl-iosTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2E6E632D2FF8AB6C005A8B28 /* Debug */,
+				2E6E632E2FF8AB6C005A8B28 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2E6E632F2FF8AB6C005A8B28 /* Build configuration list for PBXNativeTarget "amdl-iosUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2E6E63302FF8AB6C005A8B28 /* Debug */,
+				2E6E63312FF8AB6C005A8B28 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2E6E64102FF8AB6C005A8B28 /* Build configuration list for PBXNativeTarget "DownloadLiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2E6E640E2FF8AB6C005A8B28 /* Debug */,
+				2E6E640F2FF8AB6C005A8B28 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2E6E650C2FF8AB6C005A8B28 /* Build configuration list for PBXNativeTarget "ShareDownloadExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2E6E650A2FF8AB6C005A8B28 /* Debug */,
+				2E6E650B2FF8AB6C005A8B28 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 2E6E62FB2FF8AB6A005A8B28 /* Project object */;
+}

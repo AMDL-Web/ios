@@ -1,0 +1,24 @@
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+*.moved-aside
+*.xccheckout
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Claude Code local config
+.claude/
+
+# Codex local config
+.codex/
+
+# Skills tooling (e.g. ShipSwift recipe library installed via `npx skills add`)
+.agents/
+skills-lock.json
