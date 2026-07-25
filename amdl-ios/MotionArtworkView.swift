@@ -10,20 +10,25 @@ import UIKit
 
 /// 盖在静态封面之上的动态封面图层。
 ///
-/// 没有动态封面、未登录 Apple Music、开了「减弱动态效果」或低电量模式时整个视图
-/// 不渲染任何东西，下面的 [JobArtworkView] 原样露出。
+/// URL 由后端下发（`motion_artwork_url`）。**不要试图在 App 里直接查 Apple Music**：
+/// `editorialVideo` 不对第三方开放，MusicKit 走的 api.music.apple.com 永远返回空，
+/// 只有后端用 web player token 打 amp-api 才拿得到。真机验证过。
+///
+/// 没有动态封面、开了「减弱动态效果」或低电量模式时整个视图不渲染任何东西，
+/// 下面的 [JobArtworkView] 原样露出。
 struct MotionArtworkView: View {
     let job: Job
 
-    @State private var artwork: MotionArtworkStore.MotionArtwork?
     @State private var isRendering = false
     @State private var isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
-    private var request: MotionArtworkStore.Request? {
-        MotionArtworkStore.request(for: job)
+    /// 后端是解析之后异步回填的，所以同一个任务可能先是 nil、过一会儿才有值。
+    private var videoURL: URL? {
+        guard let raw = job.motionArtworkURL, !raw.isEmpty else { return nil }
+        return URL(string: raw)
     }
 
     /// 「减弱动态效果」是无障碍设置，低电量模式是用户的续航诉求，两者都应当让
@@ -34,9 +39,9 @@ struct MotionArtworkView: View {
 
     var body: some View {
         Group {
-            if let url = artwork?.video {
+            if let videoURL {
                 MotionArtworkPlayerLayer(
-                    url: url,
+                    url: videoURL,
                     isPlaying: shouldPlay,
                     onRenderingChange: { isRendering = $0 }
                 )
@@ -46,27 +51,13 @@ struct MotionArtworkView: View {
                 .allowsHitTesting(false)
             }
         }
-        .task(id: request?.key) {
-            await resolve()
+        .onChange(of: videoURL) { _, _ in
+            // 视图身份被导航复用去展示另一个任务时，旧封面的淡入状态不能留着。
+            isRendering = false
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
             isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
         }
-    }
-
-    private func resolve() async {
-        guard let request else {
-            artwork = nil
-            return
-        }
-        // 视图身份可能被导航复用去展示另一个任务，先清掉上一个任务的动态封面，
-        // 否则会短暂把上一张专辑的视频盖在这一张的静态封面上。
-        artwork = MotionArtworkStore.shared.cached(for: request) ?? nil
-        isRendering = artwork != nil && isRendering
-
-        let resolved = await MotionArtworkStore.shared.motionArtwork(for: request)
-        guard !Task.isCancelled else { return }
-        artwork = resolved
     }
 }
 

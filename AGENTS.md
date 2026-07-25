@@ -38,6 +38,19 @@ Concrete invariants worth knowing before you touch them:
 
 Prefer making a caller `async` over spawning an unstructured `Task`.
 
+## Don't reach for MusicKit to fill gaps in the job
+
+Animated album covers are the cautionary tale. `editorialVideo` is not available
+to third-party apps at all — MusicKit's `MusicDataRequest` goes to
+`api.music.apple.com`, which never returns it, on a real device with a paid
+subscription. Only the backend can get it, from Apple's internal amp-api with a
+scraped web-player token, so it arrives as `motion_artwork_url` on the job.
+
+Before adding a MusicKit lookup for anything the backend could carry instead,
+check that Apple actually exposes it to third parties. `PrivatePlaylistArtworkStore`
+is the one case that genuinely needs on-device MusicKit: it resolves a private
+playlist's cover with the *user's own* token, which the backend does not have.
+
 ## Cross-target details
 
 - Types shared between the app and the widget live in `LiveActivityShared/`.

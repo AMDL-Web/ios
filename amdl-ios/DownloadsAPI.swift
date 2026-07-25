@@ -86,6 +86,14 @@ struct Job: Codable, Identifiable {
     var artworkTextColor2: String? = nil
     var artworkTextColor3: String? = nil
     var artworkTextColor4: String? = nil
+    /// 动态封面的 HLS master playlist（1:1 与 3:4），来自 Apple Music 的
+    /// attributes.editorialVideo。公开无签名链接，可以直接交给播放器。
+    ///
+    /// 只有专辑和单曲任务可能有，而且只有部分专辑有。后端是在解析之后**异步**回填
+    /// 的，所以刚建的任务这两个字段是空的、过一会儿才出现（届时会推一条
+    /// motion_artwork_resolved 事件）。空就当作「没有动态封面」。
+    var motionArtworkURL: String? = nil
+    var motionArtworkTallURL: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, input, type, storefront, title, force, status, error, genre
@@ -103,6 +111,8 @@ struct Job: Codable, Identifiable {
         case artworkTextColor2 = "artwork_text_color2"
         case artworkTextColor3 = "artwork_text_color3"
         case artworkTextColor4 = "artwork_text_color4"
+        case motionArtworkURL = "motion_artwork_url"
+        case motionArtworkTallURL = "motion_artwork_tall_url"
     }
 
     var progress: Double {
@@ -159,6 +169,16 @@ struct Job: Codable, Identifiable {
         artworkTextColor4 = preferredPresentationValue(
             artworkTextColor4,
             fallback: fallback.artworkTextColor4
+        )
+        // 动态封面是异步回填的，刷新快照时更容易撞上「后端还没写完」的空窗；
+        // 沿用已经显示过的值，避免正在播放的封面被一次刷新打回静态图。
+        motionArtworkURL = preferredPresentationValue(
+            motionArtworkURL,
+            fallback: fallback.motionArtworkURL
+        )
+        motionArtworkTallURL = preferredPresentationValue(
+            motionArtworkTallURL,
+            fallback: fallback.motionArtworkTallURL
         )
     }
 

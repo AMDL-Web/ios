@@ -574,52 +574,73 @@ struct amdl_iosTests {
 
     // MARK: - 动态封面
 
-    @Test func motionArtworkParsesAlbumIDFromSluggedURL() throws {
-        let request = try #require(MotionArtworkStore.request(for: albumJob(
-            input: "https://music.apple.com/cn/album/%E6%9C%88%E3%81%AB%E5%90%91%E3%81%8B%E3%81%A3%E3%81%A6%E6%92%83%E3%81%A6-ep/1858184006"
-        )))
-        try assert(request.albumID == "1858184006", "album id from slugged URL")
-        try assert(request.storefront == "cn", "storefront from job")
+    /// types 是手工镜像后端 openapi 的，没有任何东西校验两边对齐——键名写错
+    /// 只会安静地解不出来，动态封面永远不显示。
+    @Test func jobDecodesMotionArtworkKeys() throws {
+        let json = """
+        {
+          "job": {
+            "id": "job_1",
+            "input": "https://music.apple.com/cn/album/example/1858184006",
+            "type": "album",
+            "force": false,
+            "status": "completed",
+            "total_items": 5,
+            "done_items": 5,
+            "failed_items": 0,
+            "created_at": "2026-07-26T00:00:00Z",
+            "updated_at": "2026-07-26T00:00:00Z",
+            "motion_artwork_url": "https://mvod.example/square.m3u8",
+            "motion_artwork_tall_url": "https://mvod.example/tall.m3u8"
+          },
+          "items": []
+        }
+        """.data(using: .utf8)!
+
+        let job = try DownloadsAPI.decodeDownloadDetail(from: json).job
+        try assert(job.motionArtworkURL == "https://mvod.example/square.m3u8", "square motion artwork")
+        try assert(job.motionArtworkTallURL == "https://mvod.example/tall.m3u8", "tall motion artwork")
     }
 
-    @Test func motionArtworkParsesAlbumIDWithoutSlug() throws {
-        let request = try #require(MotionArtworkStore.request(for: albumJob(
-            input: "https://music.apple.com/cn/album/1858184006"
-        )))
-        try assert(request.albumID == "1858184006", "album id without slug")
+    /// 后端是异步回填的，绝大多数快照里这两个键根本不存在，不能因此解码失败。
+    @Test func jobWithoutMotionArtworkStillDecodes() throws {
+        let json = """
+        {
+          "job": {
+            "id": "job_1",
+            "input": "https://music.apple.com/cn/playlist/example/pl.1",
+            "type": "playlist",
+            "force": false,
+            "status": "running",
+            "total_items": 1,
+            "done_items": 0,
+            "failed_items": 0,
+            "created_at": "2026-07-26T00:00:00Z",
+            "updated_at": "2026-07-26T00:00:00Z"
+          },
+          "items": []
+        }
+        """.data(using: .utf8)!
+
+        let job = try DownloadsAPI.decodeDownloadDetail(from: json).job
+        try assert(job.motionArtworkURL == nil, "absent motion artwork decodes as nil")
     }
 
-    /// 单曲链接的 `?i=` 才是歌曲 ID，路径末段仍是所属专辑——动态封面属于专辑，
-    /// 取错就会拿歌曲 ID 去查专辑接口。
-    @Test func motionArtworkUsesAlbumIDNotTrackIDForSongs() throws {
-        let job = albumJob(
-            input: "https://music.apple.com/jp/album/example/1858184006?i=1858184100",
-            type: .song
+    /// 刷新详情快照时后端可能还没写完动态封面。已经在播的封面不能被一次刷新
+    /// 打回静态图。
+    @Test func refreshPreservesMotionArtworkAcrossAnEmptySnapshot() throws {
+        var refreshed = albumJob(input: "https://music.apple.com/cn/album/example/1858184006")
+        let previous = {
+            var job = albumJob(input: "https://music.apple.com/cn/album/example/1858184006")
+            job.motionArtworkURL = "https://mvod.example/square.m3u8"
+            return job
+        }()
+
+        refreshed.preservePresentationMetadata(from: previous)
+        try assert(
+            refreshed.motionArtworkURL == "https://mvod.example/square.m3u8",
+            "a snapshot without motion artwork must not blank the playing cover"
         )
-        let request = try #require(MotionArtworkStore.request(for: job))
-        try assert(request.albumID == "1858184006", "song job resolves to its album id")
-    }
-
-    /// 后端还没回填 storefront 时退回链接路径里的那一段。
-    @Test func motionArtworkFallsBackToStorefrontInPath() throws {
-        var job = albumJob(input: "https://music.apple.com/jp/album/example/1858184006")
-        job.storefront = nil
-        let request = try #require(MotionArtworkStore.request(for: job))
-        try assert(request.storefront == "jp", "storefront falls back to URL path")
-    }
-
-    @Test func motionArtworkSkipsNonAlbumJobs() throws {
-        let playlist = albumJob(
-            input: "https://music.apple.com/cn/playlist/example/pl.u-private",
-            type: .playlist
-        )
-        try assert(MotionArtworkStore.request(for: playlist) == nil, "playlists have no album motion artwork")
-
-        let station = albumJob(
-            input: "https://music.apple.com/cn/station/example/ra.1",
-            type: .station
-        )
-        try assert(MotionArtworkStore.request(for: station) == nil, "stations have no album motion artwork")
     }
 
     private func albumJob(input: String, type: JobType = .album) -> Job {
