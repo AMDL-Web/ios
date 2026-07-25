@@ -572,6 +572,75 @@ struct amdl_iosTests {
         try assert(overrides?["media_user_token"] as? String == "user-token", "media user token")
     }
 
+    // MARK: - 动态封面
+
+    @Test func motionArtworkParsesAlbumIDFromSluggedURL() throws {
+        let request = try #require(MotionArtworkStore.request(for: albumJob(
+            input: "https://music.apple.com/cn/album/%E6%9C%88%E3%81%AB%E5%90%91%E3%81%8B%E3%81%A3%E3%81%A6%E6%92%83%E3%81%A6-ep/1858184006"
+        )))
+        try assert(request.albumID == "1858184006", "album id from slugged URL")
+        try assert(request.storefront == "cn", "storefront from job")
+    }
+
+    @Test func motionArtworkParsesAlbumIDWithoutSlug() throws {
+        let request = try #require(MotionArtworkStore.request(for: albumJob(
+            input: "https://music.apple.com/cn/album/1858184006"
+        )))
+        try assert(request.albumID == "1858184006", "album id without slug")
+    }
+
+    /// 单曲链接的 `?i=` 才是歌曲 ID，路径末段仍是所属专辑——动态封面属于专辑，
+    /// 取错就会拿歌曲 ID 去查专辑接口。
+    @Test func motionArtworkUsesAlbumIDNotTrackIDForSongs() throws {
+        let job = albumJob(
+            input: "https://music.apple.com/jp/album/example/1858184006?i=1858184100",
+            type: .song
+        )
+        let request = try #require(MotionArtworkStore.request(for: job))
+        try assert(request.albumID == "1858184006", "song job resolves to its album id")
+    }
+
+    /// 后端还没回填 storefront 时退回链接路径里的那一段。
+    @Test func motionArtworkFallsBackToStorefrontInPath() throws {
+        var job = albumJob(input: "https://music.apple.com/jp/album/example/1858184006")
+        job.storefront = nil
+        let request = try #require(MotionArtworkStore.request(for: job))
+        try assert(request.storefront == "jp", "storefront falls back to URL path")
+    }
+
+    @Test func motionArtworkSkipsNonAlbumJobs() throws {
+        let playlist = albumJob(
+            input: "https://music.apple.com/cn/playlist/example/pl.u-private",
+            type: .playlist
+        )
+        try assert(MotionArtworkStore.request(for: playlist) == nil, "playlists have no album motion artwork")
+
+        let station = albumJob(
+            input: "https://music.apple.com/cn/station/example/ra.1",
+            type: .station
+        )
+        try assert(MotionArtworkStore.request(for: station) == nil, "stations have no album motion artwork")
+    }
+
+    private func albumJob(input: String, type: JobType = .album) -> Job {
+        Job(
+            id: "job_album",
+            input: input,
+            type: type,
+            storefront: "cn",
+            title: "Example Album",
+            artworkURL: nil,
+            force: false,
+            status: .running,
+            totalItems: 0,
+            doneItems: 0,
+            failedItems: 0,
+            error: nil,
+            createdAt: .now,
+            updatedAt: .now
+        )
+    }
+
     private func assert(_ condition: Bool, _ message: String) throws {
         if !condition {
             throw TestFailure(message: message)

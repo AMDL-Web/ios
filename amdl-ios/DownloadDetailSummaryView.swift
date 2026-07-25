@@ -117,6 +117,11 @@ struct DownloadDetailSummaryView: View {
         VStack(spacing: 12) {
             JobArtworkView(job: job, pixelSize: JobArtworkLoader.heroPixelSize)
                 .aspectRatio(1, contentMode: .fit)
+                // 有动态封面的专辑在静态封面之上淡入一层循环视频；没有的话这一层
+                // 什么都不画。放在 clipShape 之前，圆角同样裁到视频上。
+                .overlay {
+                    MotionArtworkView(job: job)
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .shadow(color: .black.opacity(0.12), radius: 16, y: 4)
                 .padding(.horizontal, 32.5)
