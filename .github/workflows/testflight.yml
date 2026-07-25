@@ -56,10 +56,13 @@ jobs:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          BUILD_CERTIFICATE_DEV_BASE64: ${{ secrets.BUILD_CERTIFICATE_DEV_BASE64 }}
+          DEV_P12_PASSWORD: ${{ secrets.DEV_P12_PASSWORD }}
         run: |
           MISSING=""
           for name in APPSTORE_ISSUER_ID APPSTORE_KEY_ID APPSTORE_PRIVATE_KEY \
-                      BUILD_CERTIFICATE_BASE64 P12_PASSWORD KEYCHAIN_PASSWORD; do
+                      BUILD_CERTIFICATE_BASE64 P12_PASSWORD KEYCHAIN_PASSWORD \
+                      BUILD_CERTIFICATE_DEV_BASE64 DEV_P12_PASSWORD; do
             if [ -z "${!name}" ]; then MISSING="$MISSING $name"; fi
           done
           if [ -n "$MISSING" ]; then
@@ -102,10 +105,20 @@ jobs:
           echo "build=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
           echo "发布版本: $VERSION (build $BUILD_NUMBER)"
 
-      - name: Install Apple certificate
+      - name: Install Apple certificates
+        # 需要两张证书：
+        #   Apple Distribution — 导出 ipa 时重签用；
+        #   Apple Development  — 归档时用。命令行 xcodebuild archive 的自动签名
+        #     固定解析成开发身份（Xcode IDE 才会在归档时自动切分发），缺开发证书
+        #     就会以 "No signing certificate iOS Development found" 失败。
+        #     曾经改用 CODE_SIGNING_ALLOWED=NO 绕开，但那会让 Xcode 跳过
+        #     entitlements 处理，产物里 applesignin / aps-environment /
+        #     application-groups / iCloud 全部丢失。
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_CERTIFICATE_DEV_BASE64: ${{ secrets.BUILD_CERTIFICATE_DEV_BASE64 }}
+          DEV_P12_PASSWORD: ${{ secrets.DEV_P12_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           CERT_PATH="$RUNNER_TEMP/build_certificate.p12"
@@ -120,6 +133,12 @@ jobs:
 
           security import "$CERT_PATH" -P "$P12_PASSWORD" -A \
             -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+
+          DEV_CERT_PATH="$RUNNER_TEMP/build_certificate_dev.p12"
+          printf '%s' "$BUILD_CERTIFICATE_DEV_BASE64" | base64 --decode > "$DEV_CERT_PATH"
+          security import "$DEV_CERT_PATH" -P "$DEV_P12_PASSWORD" -A \
+            -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm -f "$DEV_CERT_PATH"
           # 允许 codesign 非交互访问私钥，否则归档时会卡在 UI 授权弹窗上。
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
           security list-keychain -d user -s "$KEYCHAIN_PATH"
@@ -153,18 +172,13 @@ jobs:
           APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
         run: |
           set -o pipefail
-          # 归档必须真正签名。曾经这里用 CODE_SIGNING_ALLOWED=NO 绕开
-          # "No signing certificate iOS Development found"，但关掉签名会让
-          # Xcode 跳过 entitlements 处理：归档里没有 entitlements，后面
-          # -exportArchive 重签时只能套一个最小集合，产物里
+          # 归档必须真正签名，否则 Xcode 跳过 entitlements 处理，产物里
           # applesignin / aps-environment / application-groups / iCloud
-          # 全部丢失（Sign in with Apple 报 ASAuthorizationError 1000，
-          # 推送和实时活动则是静默失效）。
+          # 全部丢失（登录报 ASAuthorizationError 1000，推送和实时活动静默失效）。
           #
-          # 之所以当初会退化到「开发」身份，是因为归档时没有 App Store
-          # Connect API key，自动签名无法创建分发描述文件。把 key 一并传给
-          # archive 后，-allowProvisioningUpdates 会按需创建 App Store 分发
-          # 描述文件并用分发证书签名，整条链依旧只需要一张分发证书。
+          # 命令行下自动签名固定解析成开发身份，所以上一步导入了开发证书；
+          # -allowProvisioningUpdates 配合 API key 按需创建开发描述文件。
+          # 分发签名在后面的 -exportArchive 完成，那才是 Xcode 的正常流程。
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
