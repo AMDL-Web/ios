@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		2E6E64012FF8AB6C005A8B28 /* DownloadLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2E6E64002FF8AB6C005A8B28 /* DownloadLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		2E6E65072FF8AB6C005A8B28 /* ShareDownloadExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2E6E65002FF8AB6C005A8B28 /* ShareDownloadExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		2EB100012FF8AB6D005A8B28 /* DownloadNotificationExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2EB100002FF8AB6D005A8B28 /* DownloadNotificationExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -40,6 +41,13 @@
 			remoteGlobalIDString = 2E6E65062FF8AB6C005A8B28;
 			remoteInfo = ShareDownloadExtension;
 		};
+		2EB100082FF8AB6D005A8B28 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2E6E62FB2FF8AB6A005A8B28 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2EB100072FF8AB6D005A8B28;
+			remoteInfo = DownloadNotificationExtension;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -51,6 +59,7 @@
 			files = (
 				2E6E64012FF8AB6C005A8B28 /* DownloadLiveActivity.appex in Embed Foundation Extensions */,
 				2E6E65072FF8AB6C005A8B28 /* ShareDownloadExtension.appex in Embed Foundation Extensions */,
+				2EB100012FF8AB6D005A8B28 /* DownloadNotificationExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -63,6 +72,7 @@
 		2E6E631E2FF8AB6C005A8B28 /* amdl-iosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "amdl-iosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2E6E64002FF8AB6C005A8B28 /* DownloadLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DownloadLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		2E6E65002FF8AB6C005A8B28 /* ShareDownloadExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareDownloadExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		2EB100002FF8AB6D005A8B28 /* DownloadNotificationExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DownloadNotificationExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -86,6 +96,13 @@
 				Info.plist,
 			);
 			target = 2E6E65062FF8AB6C005A8B28 /* ShareDownloadExtension */;
+		};
+		2EB100032FF8AB6D005A8B28 /* Exceptions for "DownloadNotificationExtension" folder in "DownloadNotificationExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2EB100072FF8AB6D005A8B28 /* DownloadNotificationExtension */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -129,6 +146,14 @@
 			path = ShareDownloadExtension;
 			sourceTree = "<group>";
 		};
+		2EB100022FF8AB6D005A8B28 /* DownloadNotificationExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2EB100032FF8AB6D005A8B28 /* Exceptions for "DownloadNotificationExtension" folder in "DownloadNotificationExtension" target */,
+			);
+			path = DownloadNotificationExtension;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -167,6 +192,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		2EB100052FF8AB6D005A8B28 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -176,6 +208,7 @@
 				2E6E63052FF8AB6A005A8B28 /* amdl-ios */,
 				2E6E64022FF8AB6C005A8B28 /* DownloadLiveActivity */,
 				2E6E65012FF8AB6C005A8B28 /* ShareDownloadExtension */,
+				2EB100022FF8AB6D005A8B28 /* DownloadNotificationExtension */,
 				2E6E64032FF8AB6C005A8B28 /* LiveActivityShared */,
 				2E6E63172FF8AB6C005A8B28 /* amdl-iosTests */,
 				2E6E63212FF8AB6C005A8B28 /* amdl-iosUITests */,
@@ -189,6 +222,7 @@
 				2E6E63032FF8AB6A005A8B28 /* amdl-ios.app */,
 				2E6E64002FF8AB6C005A8B28 /* DownloadLiveActivity.appex */,
 				2E6E65002FF8AB6C005A8B28 /* ShareDownloadExtension.appex */,
+				2EB100002FF8AB6D005A8B28 /* DownloadNotificationExtension.appex */,
 				2E6E63142FF8AB6C005A8B28 /* amdl-iosTests.xctest */,
 				2E6E631E2FF8AB6C005A8B28 /* amdl-iosUITests.xctest */,
 			);
@@ -212,6 +246,7 @@
 			dependencies = (
 				2E6E640D2FF8AB6C005A8B28 /* PBXTargetDependency */,
 				2E6E65092FF8AB6C005A8B28 /* PBXTargetDependency */,
+				2EB100092FF8AB6D005A8B28 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				2E6E63052FF8AB6A005A8B28 /* amdl-ios */,
@@ -315,6 +350,29 @@
 			productReference = 2E6E65002FF8AB6C005A8B28 /* ShareDownloadExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		2EB100072FF8AB6D005A8B28 /* DownloadNotificationExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2EB1000C2FF8AB6D005A8B28 /* Build configuration list for PBXNativeTarget "DownloadNotificationExtension" */;
+			buildPhases = (
+				2EB100042FF8AB6D005A8B28 /* Sources */,
+				2EB100052FF8AB6D005A8B28 /* Frameworks */,
+				2EB100062FF8AB6D005A8B28 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				2EB100022FF8AB6D005A8B28 /* DownloadNotificationExtension */,
+				2E6E64032FF8AB6C005A8B28 /* LiveActivityShared */,
+			);
+			name = DownloadNotificationExtension;
+			packageProductDependencies = (
+			);
+			productName = DownloadNotificationExtension;
+			productReference = 2EB100002FF8AB6D005A8B28 /* DownloadNotificationExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -342,6 +400,9 @@
 					2E6E65062FF8AB6C005A8B28 = {
 						CreatedOnToolsVersion = 26.4.1;
 					};
+					2EB100072FF8AB6D005A8B28 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
 				};
 			};
 			buildConfigurationList = 2E6E62FE2FF8AB6A005A8B28 /* Build configuration list for PBXProject "amdl-ios" */;
@@ -361,6 +422,7 @@
 				2E6E63022FF8AB6A005A8B28 /* amdl-ios */,
 				2E6E64082FF8AB6C005A8B28 /* DownloadLiveActivity */,
 				2E6E65062FF8AB6C005A8B28 /* ShareDownloadExtension */,
+				2EB100072FF8AB6D005A8B28 /* DownloadNotificationExtension */,
 				2E6E63132FF8AB6C005A8B28 /* amdl-iosTests */,
 				2E6E631D2FF8AB6C005A8B28 /* amdl-iosUITests */,
 			);
@@ -397,6 +459,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		2E6E65052FF8AB6C005A8B28 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2EB100062FF8AB6D005A8B28 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -441,6 +510,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		2EB100042FF8AB6D005A8B28 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -463,6 +539,11 @@
 			isa = PBXTargetDependency;
 			target = 2E6E65062FF8AB6C005A8B28 /* ShareDownloadExtension */;
 			targetProxy = 2E6E65082FF8AB6C005A8B28 /* PBXContainerItemProxy */;
+		};
+		2EB100092FF8AB6D005A8B28 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2EB100072FF8AB6D005A8B28 /* DownloadNotificationExtension */;
+			targetProxy = 2EB100082FF8AB6D005A8B28 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -862,6 +943,66 @@
 			};
 			name = Release;
 		};
+		2EB1000A2FF8AB6D005A8B28 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = DownloadNotificationExtension/DownloadNotificationExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DownloadNotificationExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "AMDL 通知封面";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-ios.DownloadNotificationExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		2EB1000B2FF8AB6D005A8B28 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = DownloadNotificationExtension/DownloadNotificationExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2VTXNMR2GL;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DownloadNotificationExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "AMDL 通知封面";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.lyjw131.amdl.amdl-ios.DownloadNotificationExtension";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -915,6 +1056,15 @@
 			buildConfigurations = (
 				2E6E650A2FF8AB6C005A8B28 /* Debug */,
 				2E6E650B2FF8AB6C005A8B28 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2EB1000C2FF8AB6D005A8B28 /* Build configuration list for PBXNativeTarget "DownloadNotificationExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2EB1000A2FF8AB6D005A8B28 /* Debug */,
+				2EB1000B2FF8AB6D005A8B28 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

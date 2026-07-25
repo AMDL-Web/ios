@@ -60,6 +60,15 @@ enum LiveActivityGatewayAPI {
         )
     }
 
+    /// 注册标准 APNs device token。普通通知（例如下载完成横幅）只能用这个
+    /// token 投递，与实时活动的 push-to-start / update token 是相互独立的凭据。
+    static func registerNotificationToken(_ token: String) async throws {
+        try await post(
+            path: "/v1/devices/\(deviceID)/push-token",
+            body: NotificationTokenRequest(token: token)
+        )
+    }
+
     static func registerActivityToken(activityID: String, token: String) async throws {
         try await post(
             path: "/v1/devices/\(deviceID)/activities",
@@ -133,6 +142,10 @@ private struct TokenRequest: Encodable {
         case frequentPushesEnabled = "frequent_pushes_enabled"
         case activeActivityCount = "active_activity_count"
     }
+}
+
+private struct NotificationTokenRequest: Encodable {
+    let token: String
 }
 
 private struct ActivityTokenRequest: Encodable {

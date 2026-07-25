@@ -1,7 +1,9 @@
 import CryptoKit
 import Foundation
 
-enum LiveActivityArtworkStore {
+/// 纯静态的文件读写，没有任何共享可变状态，因此显式 `nonisolated`：通知服务
+/// 扩展的入口回调不在 MainActor 上，需要能直接调用这里的方法。
+nonisolated enum LiveActivityArtworkStore {
     static let appGroupIdentifier = "group.com.lyjw131.amdl.amdl-ios"
     private static let cacheDirectoryName = "LiveActivityArtwork-v2"
 

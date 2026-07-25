@@ -10,6 +10,8 @@ import UserNotifications
 
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
 
+    private var pushTokenTask: Task<Void, Never>?
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -54,7 +56,30 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         print("[Push] Device Token: \(token)")
-        // TODO: 把 token POST 到自己的服务端保存
+        // 网关用这个 token 推送下载完成通知。系统每次启动都会重新回调，所以
+        // 注册失败可以留给下一次启动；这里只做有限次退避重试。
+        pushTokenTask?.cancel()
+        pushTokenTask = Task { await Self.registerPushToken(token) }
+    }
+
+    private static func registerPushToken(_ token: String) async {
+        var delay: Duration = .seconds(1)
+        for attempt in 0..<6 {
+            guard !Task.isCancelled else { return }
+            do {
+                try await LiveActivityGatewayAPI.registerNotificationToken(token)
+                print("[Push] 已向网关注册通知 token")
+                return
+            } catch {
+                print("[Push] 注册通知 token 失败（第 \(attempt + 1) 次）：\(error)")
+            }
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                return
+            }
+            delay = min(delay * 2, .seconds(30))
+        }
     }
 
     func application(
