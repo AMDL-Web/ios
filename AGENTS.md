@@ -58,11 +58,15 @@ Prefer making a caller `async` over spawning an unstructured `Task`.
 
 ## Commits
 
-Full workflow in [CONTRIBUTING.md](CONTRIBUTING.md). Feature work branches off
-`dev`; `dev` promotes to `main` for releases. Every commit needs a DCO
-`Signed-off-by` trailer (`git commit -s`) or the
+Only `main` requires a pull request, and `dev` is promoted into it for releases.
+Commit to `dev` directly otherwise — a small change doesn't need its own branch.
+(CONTRIBUTING.md says feature work always branches off `dev`; that's stricter
+than how this repo is actually worked.)
+
+Every commit needs a DCO `Signed-off-by` trailer (`git commit -s`) or the
 [DCO app](https://github.com/apps/dco) blocks the PR, and non-merge commits
-follow [Conventional Commits](https://www.conventionalcommits.org/).
+follow [Conventional Commits](https://www.conventionalcommits.org/). Rest of the
+workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 When amending, keep any existing agent attribution trailer alongside the
 sign-off rather than replacing it.
