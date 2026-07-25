@@ -138,6 +138,43 @@ the UI test target compiles.
   teams, provisioning settings, or deployment targets without explicit authorization.
 - Do not commit personal Xcode state such as `xcuserdata` or `*.xcuserstate`.
 
+## Commit and Contribution Requirements
+
+These apply to every commit that lands on `main` or `dev`, whether authored by a
+human or an agent. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
+
+### Conventional Commit titles
+
+- All non-merge commits MUST follow the
+  [Conventional Commits](https://www.conventionalcommits.org/) specification
+  (for example `feat: add download speed readout`, `fix: guard against nil job`).
+- Common types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`,
+  `chore`. Use a scope when it clarifies the change (`fix(detail): ...`).
+
+### Developer Certificate of Origin (DCO)
+
+- Every commit MUST be signed off under the
+  [Developer Certificate of Origin](https://developercertificate.org/).
+- Sign off with `git commit -s`, which appends a `Signed-off-by: Name <email>`
+  trailer matching your `git config user.name` / `user.email`.
+- The [DCO GitHub App](https://github.com/apps/dco) checks every pull request;
+  a commit missing a valid `Signed-off-by` trailer fails the check. If you forgot,
+  amend with `git commit --amend -s`, or sign off a whole branch with
+  `git rebase --signoff origin/main`.
+
+### Branching and release flow
+
+- Feature work branches off `dev`; open pull requests into `dev`, and promote
+  `dev` into `main` for releases. Keep `main` shippable.
+- iOS releases ship through App Store Connect / TestFlight, not container images,
+  so there is no automated GHCR/Docker publish step in this repository.
+
+### Agent commit attribution
+
+- Claude Code and other agents keep their own commit attribution behavior (for
+  example a `Co-Authored-By` trailer) in addition to the required DCO sign-off.
+  Do not strip an existing attribution trailer when amending.
+
 ## Change Discipline
 
 - Preserve unrelated local modifications and avoid broad mechanical rewrites.

@@ -1,0 +1,46 @@
+name: Codex Auto Review Trigger
+
+# 自动触发 Codex 审查开关：仓库变量 CODEX_AUTO_REVIEW
+# - 未设置或设为其他值：开启（默认开）
+# - 设为 "false"：关闭
+# 修改方式：Settings → Secrets and variables → Actions → Variables，
+# 或命令行：gh variable set CODEX_AUTO_REVIEW --body false
+#
+# 原理：Codex 的 GitHub 审查集成只认 An0nCh1hayaa 这个账号发出的评论来触发，
+# 默认的 GITHUB_TOKEN 发出的评论会显示为 github-actions[bot]，Codex 不会响应。
+# 所以这里改用该账号的 Personal Access Token（存为 secret CODEX_REVIEW_PAT）去发评论，
+# 让评论以该账号身份发出。PAT 需要对本仓库具备 Pull requests: Read and write 权限。
+#
+# 只在 PR 创建（opened）时触发一次，后续 push（synchronize）不会重复评论。
+
+on:
+  pull_request:
+    types: [opened]
+
+# 这个 job 不 checkout 代码，也不使用默认 GITHUB_TOKEN（用自定义 PAT 覆盖了），
+# 所以显式收紧成零权限，满足最小权限原则。
+permissions: {}
+
+jobs:
+  trigger-codex-review:
+    if: vars.CODEX_AUTO_REVIEW != 'false' && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment "@codex review" as An0nCh1hayaa
+        env:
+          GH_TOKEN: ${{ secrets.CODEX_REVIEW_PAT }}
+          REVIEW_BODY: |
+            @codex review
+
+            请重点关注（Swift 6 / SwiftUI iOS 项目）：
+            - 正确性问题（并发、错误处理、边界条件、可选值解包）
+            - Swift 6 并发安全：actor 隔离、Sendable、MainActor 是否正确，是否
+              滥用 @unchecked Sendable / nonisolated(unsafe) 压诊断
+            - 是否符合仓库架构与 AGENTS.md 中的约定
+            - 是否遵守 Conventional Commits 与 DCO sign-off 提交规范
+            - 是否混入本地路径、密钥、xcuserdata 等不适合提交的内容
+            - 是否擅自改动 bundle id、entitlements、签名、部署目标等敏感设置
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --body "$REVIEW_BODY"
