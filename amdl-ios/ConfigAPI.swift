@@ -208,7 +208,8 @@ enum ConfigAPI {
     }
 
     private static func makeURL(path: String = "/api/v1/config") throws -> URL {
-        guard var components = URLComponents(string: DownloadsAPI.baseURLString) else {
+        guard !DownloadsAPI.baseURLString.isEmpty,
+              var components = URLComponents(string: DownloadsAPI.baseURLString) else {
             throw DownloadsAPIError.invalidBaseURL
         }
         components.path = path

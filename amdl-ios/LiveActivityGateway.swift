@@ -21,18 +21,15 @@ enum LiveActivityGatewayError: LocalizedError {
 }
 
 enum LiveActivityGatewayAPI {
-    static let defaultBaseURLString = "http://192.168.3.38:18081"
+    /// 同 `DownloadsAPI.defaultBaseURLString`：不内置具体地址，首次使用需手动填写。
+    static let defaultBaseURLString = ""
     private static let baseURLKey = "liveActivityGatewayBaseURL"
     private static let deviceIDKey = "liveActivityGatewayDeviceID"
 
     static var baseURLString: String {
         get {
-            let stored = UserDefaults.standard.string(forKey: baseURLKey)
-            if stored == "http://127.0.0.1:18081" {
-                UserDefaults.standard.set(defaultBaseURLString, forKey: baseURLKey)
-                return defaultBaseURLString
-            }
-            return stored ?? defaultBaseURLString
+            // 不再改写用户存下的地址：内置默认值已移除，填什么用什么。
+            UserDefaults.standard.string(forKey: baseURLKey) ?? defaultBaseURLString
         }
         set { UserDefaults.standard.set(newValue, forKey: baseURLKey) }
     }
@@ -71,7 +68,7 @@ enum LiveActivityGatewayAPI {
     }
 
     static func activityStatus() async throws -> ActivityStatusResponse {
-        guard var components = URLComponents(string: baseURLString) else {
+        guard !baseURLString.isEmpty, var components = URLComponents(string: baseURLString) else {
             throw LiveActivityGatewayError.invalidURL
         }
         components.path = "/health"
@@ -92,7 +89,7 @@ enum LiveActivityGatewayAPI {
     }
 
     private static func post<T: Encodable>(path: String, body: T) async throws {
-        guard var components = URLComponents(string: baseURLString) else {
+        guard !baseURLString.isEmpty, var components = URLComponents(string: baseURLString) else {
             throw LiveActivityGatewayError.invalidURL
         }
         components.path = path

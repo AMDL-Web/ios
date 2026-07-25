@@ -37,7 +37,7 @@ struct DebugView: View {
     var body: some View {
         Form {
             Section {
-                TextField("http://192.168.58.110:18080", text: $backendBaseURL)
+                TextField("http://localhost:18080", text: $backendBaseURL)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -49,7 +49,7 @@ struct DebugView: View {
             }
 
             Section {
-                TextField("http://192.168.3.38:18081", text: $liveActivityGatewayBaseURL)
+                TextField("http://localhost:18081", text: $liveActivityGatewayBaseURL)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()

@@ -269,7 +269,8 @@ enum LogsAPI {
 
     /// 日志流的 WebSocket 端点；续接时带上最后收到的 sequence。
     static func webSocketURL(filter: LogFilter, after: UInt64?) throws -> URL {
-        guard var components = URLComponents(string: DownloadsAPI.baseURLString) else {
+        guard !DownloadsAPI.baseURLString.isEmpty,
+              var components = URLComponents(string: DownloadsAPI.baseURLString) else {
             throw DownloadsAPIError.invalidBaseURL
         }
         components.scheme = components.scheme?.lowercased() == "https" ? "wss" : "ws"
@@ -286,7 +287,8 @@ enum LogsAPI {
     }
 
     private static func makeURL(path: String, queryItems: [URLQueryItem]) throws -> URL {
-        guard var components = URLComponents(string: DownloadsAPI.baseURLString) else {
+        guard !DownloadsAPI.baseURLString.isEmpty,
+              var components = URLComponents(string: DownloadsAPI.baseURLString) else {
             throw DownloadsAPIError.invalidBaseURL
         }
         components.path = path

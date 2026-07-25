@@ -729,7 +729,9 @@ enum DownloadsAPIError: LocalizedError {
 
 enum DownloadsAPI {
     private static let baseURLKey = "backendBaseURL"
-    static let defaultBaseURLString = "http://192.168.58.110:18080"
+    /// 故意留空：仓库公开后不再内置任何具体地址，首次使用需在「配置 → 调试」
+    /// 里填写后端地址。空值会让下面的请求构造抛出 `invalidBaseURL`，提示用户去填。
+    static let defaultBaseURLString = ""
     static let appGroupIdentifier = "group.com.lyjw131.amdl.amdl-ios"
     private static let sharedDefaults = UserDefaults(suiteName: appGroupIdentifier)
 
@@ -739,14 +741,11 @@ enum DownloadsAPI {
             if let shared = sharedDefaults?.string(forKey: baseURLKey), !shared.isEmpty {
                 return shared
             }
+            // 早期版本把地址存在 standard defaults 里，这里搬进 App Group 让
+            // 分享扩展也能读到。不再改写具体地址：内置默认值已移除，用户填什么用什么。
             if let legacy = UserDefaults.standard.string(forKey: baseURLKey), !legacy.isEmpty {
-                // The old default used a VPN-only address. Promote it to the
-                // current LAN address so a physical device can reach the API.
-                let migrated = legacy == "http://192.168.3.44:18080"
-                    ? defaultBaseURLString
-                    : legacy
-                sharedDefaults?.set(migrated, forKey: baseURLKey)
-                return migrated
+                sharedDefaults?.set(legacy, forKey: baseURLKey)
+                return legacy
             }
             return defaultBaseURLString
         }
@@ -841,7 +840,9 @@ enum DownloadsAPI {
 
     /// 任务事件流的 WebSocket 端点；断线重连时带上 last_event_id 只接收更新的事件。
     static func eventsWebSocketURL(jobID: String, lastEventID: Int64 = 0) throws -> URL {
-        guard var components = URLComponents(string: baseURLString) else {
+        // 地址为空时 URLComponents 仍会构造成功，只是没有 scheme/host，因此显式
+        // 排除空串，让未配置地址走到 invalidBaseURL 的提示上。
+        guard !baseURLString.isEmpty, var components = URLComponents(string: baseURLString) else {
             throw DownloadsAPIError.invalidBaseURL
         }
 
@@ -860,7 +861,9 @@ enum DownloadsAPI {
 
     /// 总览级下载列表变化的 WebSocket 端点；断线重连时带上 last_event_id 只接收更新的变化。
     static func downloadsFeedWebSocketURL(lastEventID: Int64 = 0) throws -> URL {
-        guard var components = URLComponents(string: baseURLString) else {
+        // 地址为空时 URLComponents 仍会构造成功，只是没有 scheme/host，因此显式
+        // 排除空串，让未配置地址走到 invalidBaseURL 的提示上。
+        guard !baseURLString.isEmpty, var components = URLComponents(string: baseURLString) else {
             throw DownloadsAPIError.invalidBaseURL
         }
 
@@ -877,7 +880,9 @@ enum DownloadsAPI {
     }
 
     private static func makeURL(path: String, queryItems: [URLQueryItem] = []) throws -> URL {
-        guard var components = URLComponents(string: baseURLString) else {
+        // 地址为空时 URLComponents 仍会构造成功，只是没有 scheme/host，因此显式
+        // 排除空串，让未配置地址走到 invalidBaseURL 的提示上。
+        guard !baseURLString.isEmpty, var components = URLComponents(string: baseURLString) else {
             throw DownloadsAPIError.invalidBaseURL
         }
         components.path = path

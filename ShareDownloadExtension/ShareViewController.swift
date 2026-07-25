@@ -2,7 +2,9 @@ import UIKit
 import UniformTypeIdentifiers
 
 final class ShareViewController: UIViewController {
-    private static let defaultBackendBaseURL = "http://192.168.58.110:18080"
+    /// 同主 App：不内置具体地址。用户没在主 App 里填过后端地址时，分享扩展会
+    /// 走下面的 `guard` 分支提示去配置，而不是打到一个写死的地址上。
+    private static let defaultBackendBaseURL = ""
     private static let backendBaseURLKey = "backendBaseURL"
     private static let appGroupIdentifier = "group.com.lyjw131.amdl.amdl-ios"
 
@@ -244,7 +246,8 @@ final class ShareViewController: UIViewController {
     private func backendBaseURL() throws -> URL {
         let configuredBaseURL = UserDefaults(suiteName: Self.appGroupIdentifier)?
             .string(forKey: Self.backendBaseURLKey)
-        guard let baseURL = URL(string: configuredBaseURL ?? Self.defaultBackendBaseURL) else {
+        let candidate = configuredBaseURL ?? Self.defaultBackendBaseURL
+        guard !candidate.isEmpty, let baseURL = URL(string: candidate) else {
             throw ShareSubmissionError.invalidBackendURL
         }
         return baseURL
