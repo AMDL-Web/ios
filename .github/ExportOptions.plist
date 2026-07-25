@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- TestFlight / App Store 分发。app-store-connect 是 Xcode 15+ 对旧
+	     app-store 方法的新名称。 -->
+	<key>method</key>
+	<string>app-store-connect</string>
+
+	<key>teamID</key>
+	<string>2VTXNMR2GL</string>
+
+	<!-- 自动管理签名：配合 xcodebuild -allowProvisioningUpdates 与 App Store
+	     Connect API key，缺失的分发描述文件会自动创建（主 App 与两个扩展各一）。 -->
+	<key>signingStyle</key>
+	<string>automatic</string>
+
+	<!-- 上传由工作流单独用 altool 执行，这里只导出 ipa，便于分离构建与上传的
+	     失败排查。 -->
+	<key>destination</key>
+	<string>export</string>
+
+	<!-- 交给 App Store 生成瘦身后的分发包。 -->
+	<key>uploadSymbols</key>
+	<true/>
+
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+</dict>
+</plist>
