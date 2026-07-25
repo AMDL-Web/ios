@@ -1,185 +1,68 @@
-# AMDL iOS Agent Guide
+# amdl-ios
 
-## Scope
+SwiftUI app for creating and monitoring Apple Music download jobs against
+`amdl-backend`, plus a Live Activity widget, a share extension, and a
+notification service extension. `DownloadsAPI.swift` mirrors the backend's JSON
+shapes by hand — see the [repository map](../AGENTS.md) before changing them.
 
-This guide applies to the entire iOS project in this directory. The repository-level
-`../AGENTS.md` remains the routing guide for work that crosses subprojects.
+**Building or testing:** read `.claude/skills/ios-verify/SKILL.md`. It has the
+exact `xcodebuild` invocations, which simulator to target, and how much
+verification a given change deserves.
 
-Keep iOS-only changes inside this project. If a task also changes backend or frontend
-behavior, read the corresponding subproject guide before editing those files.
+## Swift 6 concurrency is strict here, and stays strict
 
-## Project Overview
+All targets compile in Swift 6 language mode with complete checking; the app and
+extension targets default to `MainActor` isolation.
 
-AMDL is a SwiftUI iOS app for creating and monitoring Apple Music download jobs.
-The Xcode project contains five targets:
+Fix isolation and `Sendable` errors at the source. Loosening a build setting,
+reaching for `@unchecked Sendable` or `nonisolated(unsafe)`, or widening a
+`@preconcurrency` import to make a diagnostic go away all trade a compile-time
+guarantee for a runtime data race. Use the escape hatches only when a real
+invariant genuinely can't be expressed in the type system, and write down which
+invariant and why.
 
-- `amdl-ios`: main SwiftUI application.
-- `DownloadLiveActivity`: WidgetKit and ActivityKit extension.
-- `ShareDownloadExtension`: UIKit share extension for Apple Music links.
-- `amdl-iosTests`: unit tests using Swift Testing.
-- `amdl-iosUITests`: UI tests using XCTest.
+Concrete invariants worth knowing before you touch them:
 
-Shared Live Activity models and artwork storage live in `LiveActivityShared/`.
+- `ImageDiskStore` serializes disk cache I/O and clears by generation counter.
+  Preserve those semantics — a clear that isn't generation-aware races with
+  in-flight writes.
+- `AppleMusicTokenService` exists so MusicKit's shared token provider is only
+  reached from one place. Route token access through it rather than calling the
+  SDK directly.
+- ActivityKit reference types stay inside the isolation domain that owns them.
+  Pass activity IDs and sendable content across boundaries, not the activity.
+- Objective-C callback values need converting to a sendable representation
+  before you resume a continuation with them.
+- Check cancellation after meaningful suspension points, before you commit
+  downloaded data or push new UI state.
 
-## Toolchain and Language Rules
+Prefer making a caller `async` over spawning an unstructured `Task`.
 
-- Use the Xcode version selected by `xcode-select`; do not change the selected
-  developer directory as part of routine project work.
-- All targets compile in Swift 6 language mode.
-- The app and extension targets use `MainActor` as their default actor isolation.
-- Preserve complete Swift 6 concurrency checking. Fix isolation and `Sendable`
-  errors at their source instead of weakening build settings.
-- Do not add `@unchecked Sendable` or `nonisolated(unsafe)` merely to silence a
-  diagnostic. Use either only when a reviewed invariant cannot be expressed safely.
-- Keep `@preconcurrency` imports narrow and document why the imported SDK requires
-  the compatibility boundary.
+## Cross-target details
 
-## Architecture and Concurrency
+- Types shared between the app and the widget live in `LiveActivityShared/`.
+  Don't re-declare a parallel copy in a target that needs one; add the target to
+  the shared file's membership.
+- User-facing copy is Chinese. Keep it that way unless the task is about the
+  wording.
 
-- SwiftUI and UIKit state belongs on `MainActor` unless there is a concrete reason
-  to isolate it elsewhere.
-- Use actors for mutable state that is accessed by multiple tasks. Disk cache I/O is
-  serialized by `ImageDiskStore`; preserve its generation-based clear semantics.
-- Values crossing actor or task boundaries must be `Sendable`. Convert Objective-C
-  callback values to a sendable representation before resuming a continuation.
-- Respect task cancellation after every meaningful suspension point before updating
-  UI state or committing downloaded data.
-- Avoid unstructured `Task` blocks when the caller can make the operation `async`
-  and await it.
-- Keep ActivityKit reference types inside the isolation domain where they are used.
-  Pass activity IDs and sendable content across isolation boundaries.
-- Route MusicKit token access through `AppleMusicTokenService` so access to the SDK's
-  shared token provider remains serialized.
+## Project file and signing
 
-## Source Organization
+- Touch `amdl-ios.xcodeproj/project.pbxproj` only when target membership or a
+  build setting actually requires it, and keep Debug and Release aligned unless
+  the difference is deliberate.
+- Bundle identifiers, entitlements, App Group identifiers, signing teams,
+  provisioning, and deployment targets need explicit authorization to change —
+  they break TestFlight and the App Group the widget reads from.
+- Never commit `xcuserdata` or `*.xcuserstate`.
 
-- Put main-app code in `amdl-ios/`.
-- Put share-extension-only code in `ShareDownloadExtension/`.
-- Put Live Activity UI in `DownloadLiveActivity/` and models shared with the app in
-  `LiveActivityShared/`.
-- Add unit tests to `amdl-iosTests/` and UI tests to `amdl-iosUITests/`.
-- Do not duplicate shared ActivityKit types independently across targets.
-- Preserve existing Chinese user-facing copy unless the task explicitly changes it.
+## Commits
 
-## Build and Test
+Full workflow in [CONTRIBUTING.md](CONTRIBUTING.md). Feature work branches off
+`dev`; `dev` promotes to `main` for releases. Every commit needs a DCO
+`Signed-off-by` trailer (`git commit -s`) or the
+[DCO app](https://github.com/apps/dco) blocks the PR, and non-merge commits
+follow [Conventional Commits](https://www.conventionalcommits.org/).
 
-Run commands from this directory. Use a temporary Derived Data directory so local
-Xcode state does not affect verification.
-
-Debug simulator build:
-
-```sh
-build_dir=$(mktemp -d /tmp/amdl-ios-debug.XXXXXX)
-xcodebuild \
-  -project amdl-ios.xcodeproj \
-  -scheme amdl-ios \
-  -configuration Debug \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.4.1' \
-  -derivedDataPath "$build_dir" \
-  CODE_SIGNING_ALLOWED=NO \
-  build
-```
-
-Release simulator build:
-
-```sh
-build_dir=$(mktemp -d /tmp/amdl-ios-release.XXXXXX)
-xcodebuild \
-  -project amdl-ios.xcodeproj \
-  -scheme amdl-ios \
-  -configuration Release \
-  -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath "$build_dir" \
-  CODE_SIGNING_ALLOWED=NO \
-  build
-```
-
-Unit tests:
-
-```sh
-test_dir=$(mktemp -d /tmp/amdl-ios-tests.XXXXXX)
-xcodebuild \
-  -project amdl-ios.xcodeproj \
-  -scheme amdl-ios \
-  -configuration Debug \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.4.1' \
-  -derivedDataPath "$test_dir" \
-  CODE_SIGNING_ALLOWED=NO \
-  -only-testing:amdl-iosTests \
-  test
-```
-
-If that exact simulator runtime is unavailable, choose an installed iPhone simulator
-from `xcodebuild -project amdl-ios.xcodeproj -scheme amdl-ios -showdestinations`.
-
-UI tests require a working Simulator test runner. A local Xcode debugger/runtime
-failure is not a test assertion failure; report it separately and still verify that
-the UI test target compiles.
-
-## Verification Expectations
-
-- For a localized source edit, build the affected target at minimum.
-- For concurrency, model, API, or project-setting changes, build the full `amdl-ios`
-  scheme in Debug.
-- Do not run unit tests during iterative development; run them only right before a
-  commit, or when the user explicitly asks for them.
-- For release-sensitive or cross-target changes, also perform a Release build.
-- Treat every Swift concurrency warning as actionable.
-- `Metadata extraction skipped. No AppIntents.framework dependency found` from a
-  target without App Intents is an Xcode metadata warning, not a Swift 6 diagnostic.
-- Run `git diff --check` before handing work off.
-
-## Project File and Signing Safety
-
-- Edit `amdl-ios.xcodeproj/project.pbxproj` only when target membership or build
-  settings genuinely require it.
-- Keep Debug and Release settings aligned unless a difference is intentional.
-- Do not change bundle identifiers, entitlements, App Group identifiers, signing
-  teams, provisioning settings, or deployment targets without explicit authorization.
-- Do not commit personal Xcode state such as `xcuserdata` or `*.xcuserstate`.
-
-## Commit and Contribution Requirements
-
-These apply to every commit that lands on `main` or `dev`, whether authored by a
-human or an agent. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
-
-### Conventional Commit titles
-
-- All non-merge commits MUST follow the
-  [Conventional Commits](https://www.conventionalcommits.org/) specification
-  (for example `feat: add download speed readout`, `fix: guard against nil job`).
-- Common types: `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`,
-  `chore`. Use a scope when it clarifies the change (`fix(detail): ...`).
-
-### Developer Certificate of Origin (DCO)
-
-- Every commit MUST be signed off under the
-  [Developer Certificate of Origin](https://developercertificate.org/).
-- Sign off with `git commit -s`, which appends a `Signed-off-by: Name <email>`
-  trailer matching your `git config user.name` / `user.email`.
-- The [DCO GitHub App](https://github.com/apps/dco) checks every pull request;
-  a commit missing a valid `Signed-off-by` trailer fails the check. If you forgot,
-  amend with `git commit --amend -s`, or sign off a whole branch with
-  `git rebase --signoff origin/main`.
-
-### Branching and release flow
-
-- Feature work branches off `dev`; open pull requests into `dev`, and promote
-  `dev` into `main` for releases. Keep `main` shippable.
-- iOS releases ship through App Store Connect / TestFlight, not container images,
-  so there is no automated GHCR/Docker publish step in this repository.
-
-### Agent commit attribution
-
-- Claude Code and other agents keep their own commit attribution behavior (for
-  example a `Co-Authored-By` trailer) in addition to the required DCO sign-off.
-  Do not strip an existing attribution trailer when amending.
-
-## Change Discipline
-
-- Preserve unrelated local modifications and avoid broad mechanical rewrites.
-- Keep fixes scoped to the requested behavior and add tests for parsing, state
-  transitions, or request encoding when practical.
-- Do not commit, push, or open a pull request unless the user requests it.
-- In the handoff, list changed files, builds/tests performed, remaining warnings,
-  and any verification blocked by local Xcode or Simulator state.
+When amending, keep any existing agent attribution trailer alongside the
+sign-off rather than replacing it.

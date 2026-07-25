@@ -13,8 +13,9 @@ build/
 .build/
 .swiftpm/
 
-# Claude Code local config
-.claude/
+# Claude Code local config — but share the skills, they document the build
+.claude/*
+!.claude/skills/
 
 # Codex local config
 .codex/
