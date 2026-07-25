@@ -18,6 +18,8 @@ struct DebugView: View {
     @State private var musicUserToken = ""
     @State private var errorMessage: String?
     @State private var isRequestingAuthorization = false
+    @State private var appleAuth = AppleAuthStore.shared
+    @State private var appleAuthError: String?
 
     private var authorizationStatusText: String {
         switch authorizationStatus {
@@ -60,6 +62,38 @@ struct DebugView: View {
                 Text("网关订阅后端任务事件流，并通过 APNs 把下载进度和状态推送到灵动岛。修改地址后请重新启动 App，以向新网关注册实时活动 token。")
             }
 
+            Section {
+                if appleAuth.isSignedIn {
+                    LabeledContent("账号", value: appleAuth.email ?? "已登录")
+                    LabeledContent("令牌", value: appleTokenStatusText)
+                    Button(role: .destructive, action: appleAuth.signOut) {
+                        Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                }
+
+                Button(action: appleSignInTapped) {
+                    if appleAuth.isSigningIn {
+                        ProgressView()
+                    } else {
+                        Label(
+                            appleAuth.isSignedIn ? "重新获取令牌" : "通过 Apple 登录",
+                            systemImage: "apple.logo"
+                        )
+                    }
+                }
+                .disabled(appleAuth.isSigningIn)
+
+                if let appleAuthError {
+                    Text(appleAuthError)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+            } header: {
+                Text("网关认证")
+            } footer: {
+                Text("后端和实时活动网关都在 oauth2-proxy 后面，请求需要带上「通过 Apple 登录」签发的身份令牌。有效期约 24 小时，过期后无法静默续期，需要回到这里重新获取。令牌只会发给网关域名，封面等第三方资源不会带上。")
+            }
+
             Section("Apple Music") {
                 LabeledContent("授权状态", value: authorizationStatusText)
 
@@ -100,6 +134,27 @@ struct DebugView: View {
         .navigationTitle("调试")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: backendBaseURL, initial: false, backendBaseURLChanged)
+        .onAppear { appleAuth.refreshFromStore() }
+    }
+
+    private var appleTokenStatusText: String {
+        guard let expiresAt = appleAuth.expiresAt else { return "无" }
+        let remaining = expiresAt.timeIntervalSinceNow
+        guard remaining > 0 else { return "已过期" }
+        return "剩余 \(Int(remaining / 60)) 分 \(Int(remaining.truncatingRemainder(dividingBy: 60))) 秒"
+    }
+
+    private func appleSignInTapped() {
+        appleAuthError = nil
+        Task {
+            do {
+                try await appleAuth.signIn()
+            } catch AppleAuthError.canceled {
+                // 用户主动取消，不当成错误提示。
+            } catch {
+                appleAuthError = error.localizedDescription
+            }
+        }
     }
 
     private func authorizationButtonTapped() {

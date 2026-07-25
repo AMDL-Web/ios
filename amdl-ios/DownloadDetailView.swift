@@ -180,7 +180,7 @@ struct DownloadDetailView: View {
                     jobID: jobID,
                     lastEventID: lastEventID
                 )
-                let socket = URLSession.shared.webSocketTask(with: url)
+                let socket = URLSession.shared.authorizedWebSocketTask(with: url)
                 socket.resume()
 
                 try await withTaskCancellationHandler {

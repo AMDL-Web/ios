@@ -172,7 +172,7 @@ enum ConfigAPI {
     /// 读取当前配置。后端会先尝试重新加载 config.yaml，再返回最近一次可用配置。
     static func getConfig() async throws -> ConfigResponse {
         let url = try makeURL()
-        var request = URLRequest(url: url)
+        var request = URLRequest(authorizedURL: url)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         return try await send(request)
@@ -181,7 +181,7 @@ enum ConfigAPI {
     /// 提交配置。请求体是（可能部分的）RuntimeConfig，后端对缺省键做深合并。
     static func updateConfig(_ config: RuntimeConfig) async throws -> ConfigResponse {
         let url = try makeURL()
-        var request = URLRequest(url: url)
+        var request = URLRequest(authorizedURL: url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(config)
@@ -197,7 +197,7 @@ enum ConfigAPI {
     /// 一个开关，也不要显示一个其实不生效的开关。
     static func signedModeEnabled() async -> Bool {
         guard let url = try? makeURL(path: "/api/v1/developer-token") else { return false }
-        var request = URLRequest(url: url)
+        var request = URLRequest(authorizedURL: url)
         request.httpMethod = "GET"
         guard let (_, response) = try? await URLSession.shared.data(for: request),
               let httpResponse = response as? HTTPURLResponse

@@ -73,7 +73,7 @@ final class ImageCache {
         let taskID = UUID()
         let task = Task { [weak self] in
             do {
-                let (data, response) = try await URLSession.shared.data(from: url)
+                let (data, response) = try await URLSession.shared.data(for: URLRequest(authorizedURL: url))
                 if let response = response as? HTTPURLResponse,
                    !(200..<300).contains(response.statusCode) {
                     return

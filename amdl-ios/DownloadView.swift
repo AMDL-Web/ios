@@ -151,7 +151,7 @@ struct DownloadView: View {
         while !Task.isCancelled {
             do {
                 let url = try DownloadsAPI.downloadsFeedWebSocketURL(lastEventID: lastEventID)
-                let socket = URLSession.shared.webSocketTask(with: url)
+                let socket = URLSession.shared.authorizedWebSocketTask(with: url)
                 socket.resume()
 
                 try await withTaskCancellationHandler {

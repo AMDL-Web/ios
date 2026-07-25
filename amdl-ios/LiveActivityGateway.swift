@@ -21,8 +21,9 @@ enum LiveActivityGatewayError: LocalizedError {
 }
 
 enum LiveActivityGatewayAPI {
-    /// 同 `DownloadsAPI.defaultBaseURLString`：不内置具体地址，首次使用需手动填写。
-    static let defaultBaseURLString = ""
+    /// 同 `DownloadsAPI.defaultBaseURLString`，走同一个网关域名，只是网关把
+    /// `/apns` 前缀剥掉后转给 APNs 推送后端，所以这里必须带上该前缀。
+    static let defaultBaseURLString = "https://backend-dev-amdl.lyjw131.com/apns"
     private static let baseURLKey = "liveActivityGatewayBaseURL"
     private static let deviceIDKey = "liveActivityGatewayDeviceID"
 
@@ -76,15 +77,26 @@ enum LiveActivityGatewayAPI {
         )
     }
 
-    static func activityStatus() async throws -> ActivityStatusResponse {
+    /// 网关地址可以带路径前缀（反向代理下是 `https://<域名>/apns`），所以端点路径
+    /// 要**追加**在它后面。早先这里直接 `components.path = path`，会把前缀整个
+    ///覆盖掉，请求打到 `/v1/devices/...` 而不是 `/apns/v1/devices/...`。
+    private static func makeURL(path: String) -> URL? {
         guard !baseURLString.isEmpty, var components = URLComponents(string: baseURLString) else {
+            return nil
+        }
+        var prefix = components.path
+        while prefix.hasSuffix("/") {
+            prefix.removeLast()
+        }
+        components.path = prefix + path
+        return components.url
+    }
+
+    static func activityStatus() async throws -> ActivityStatusResponse {
+        guard let url = makeURL(path: "/health") else {
             throw LiveActivityGatewayError.invalidURL
         }
-        components.path = "/health"
-        guard let url = components.url else {
-            throw LiveActivityGatewayError.invalidURL
-        }
-        var request = URLRequest(url: url)
+        var request = URLRequest(authorizedURL: url)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -98,14 +110,10 @@ enum LiveActivityGatewayAPI {
     }
 
     private static func post<T: Encodable>(path: String, body: T) async throws {
-        guard !baseURLString.isEmpty, var components = URLComponents(string: baseURLString) else {
+        guard let url = makeURL(path: path) else {
             throw LiveActivityGatewayError.invalidURL
         }
-        components.path = path
-        guard let url = components.url else {
-            throw LiveActivityGatewayError.invalidURL
-        }
-        var request = URLRequest(url: url)
+        var request = URLRequest(authorizedURL: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -598,7 +606,7 @@ final class DownloadLiveActivityManager {
         }
         do {
             print("[LiveActivity] 开始下载高清封面")
-            var request = URLRequest(url: url)
+            var request = URLRequest(authorizedURL: url)
             request.cachePolicy = .returnCacheDataElseLoad
             request.timeoutInterval = 15
             let (data, response) = try await URLSession.shared.data(for: request)

@@ -729,9 +729,10 @@ enum DownloadsAPIError: LocalizedError {
 
 enum DownloadsAPI {
     private static let baseURLKey = "backendBaseURL"
-    /// 故意留空：仓库公开后不再内置任何具体地址，首次使用需在「配置 → 调试」
-    /// 里填写后端地址。空值会让下面的请求构造抛出 `invalidBaseURL`，提示用户去填。
-    static let defaultBaseURLString = ""
+    /// 公开部署的测试后端。它在网关（oauth2-proxy）后面，所有 /api 请求都需要
+    /// 「通过 Apple 登录」拿到的 Bearer 令牌，见 `AppleAuth.swift`。
+    /// 仍然可以在「配置 → 调试」里改成别的地址。
+    static let defaultBaseURLString = "https://backend-dev-amdl.lyjw131.com"
     static let appGroupIdentifier = "group.com.lyjw131.amdl.amdl-ios"
     private static let sharedDefaults = UserDefaults(suiteName: appGroupIdentifier)
 
@@ -794,7 +795,7 @@ enum DownloadsAPI {
         mediaUserToken: String?
     ) async throws -> DownloadSubmitResponse {
         let url = try makeURL(path: "/api/v1/downloads")
-        var request = URLRequest(url: url)
+        var request = URLRequest(authorizedURL: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(
@@ -895,7 +896,7 @@ enum DownloadsAPI {
     }
 
     private static func fetchData(from url: URL) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await URLSession.shared.data(for: URLRequest(authorizedURL: url))
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw DownloadsAPIError.invalidResponse

@@ -4,7 +4,9 @@ import UniformTypeIdentifiers
 final class ShareViewController: UIViewController {
     /// 同主 App：不内置具体地址。用户没在主 App 里填过后端地址时，分享扩展会
     /// 走下面的 `guard` 分支提示去配置，而不是打到一个写死的地址上。
-    private static let defaultBackendBaseURL = ""
+    /// 与 `DownloadsAPI.defaultBaseURLString` 保持一致；主 App 改过地址时，
+    /// App Group 里存的值优先。
+    private static let defaultBackendBaseURL = "https://backend-dev-amdl.lyjw131.com"
     private static let backendBaseURLKey = "backendBaseURL"
     private static let appGroupIdentifier = "group.com.lyjw131.amdl.amdl-ios"
 
@@ -243,6 +245,24 @@ final class ShareViewController: UIViewController {
         throw ShareSubmissionError.missingURL
     }
 
+    /// 主 App 里「通过 Apple 登录」拿到的 identity token，网关拿它做认证。
+    /// 扩展和主 App 没有共享源码目录，所以和后端地址一样直接读 App Group——
+    /// 键名与 `AppleAuthCredentialStore` 保持一致。令牌过期时返回 nil，请求会
+    /// 收到 401，用户需要回主 App 重新登录。
+    private static func appleBearerToken() -> String? {
+        guard let defaults = UserDefaults(suiteName: appGroupIdentifier),
+              let token = defaults.string(forKey: "appleIdentityToken"), !token.isEmpty,
+              let expiresAt = defaults.object(forKey: "appleIdentityTokenExpiresAt") as? Double,
+              Date(timeIntervalSince1970: expiresAt).timeIntervalSinceNow > 30
+        else { return nil }
+        return token
+    }
+
+    private static func authorized(_ request: inout URLRequest) {
+        guard let token = appleBearerToken() else { return }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
     private func backendBaseURL() throws -> URL {
         let configuredBaseURL = UserDefaults(suiteName: Self.appGroupIdentifier)?
             .string(forKey: Self.backendBaseURLKey)
@@ -258,6 +278,7 @@ final class ShareViewController: UIViewController {
         request.httpMethod = "POST"
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        Self.authorized(&request)
         request.httpBody = try JSONEncoder().encode(ShareDownloadRequest(urls: [sharedURL.absoluteString]))
 
         let (data, response) = try await session.data(for: request)
@@ -281,7 +302,9 @@ final class ShareViewController: UIViewController {
     private func fetchDetail(jobID: String) async throws -> ShareDownloadDetail {
         let encodedID = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
         let url = try backendBaseURL().appending(path: "/api/v1/downloads/\(encodedID)")
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        Self.authorized(&request)
+        let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else {
             throw ShareSubmissionError.invalidResponse
         }

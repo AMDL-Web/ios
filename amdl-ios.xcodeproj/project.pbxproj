@@ -363,8 +363,8 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				2EB100022FF8AB6D005A8B28 /* DownloadNotificationExtension */,
 				2E6E64032FF8AB6C005A8B28 /* LiveActivityShared */,
+				2EB100022FF8AB6D005A8B28 /* DownloadNotificationExtension */,
 			);
 			name = DownloadNotificationExtension;
 			packageProductDependencies = (

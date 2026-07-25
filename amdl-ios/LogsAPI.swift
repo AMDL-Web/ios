@@ -219,7 +219,7 @@ enum LogsAPI {
             items.append(URLQueryItem(name: "after", value: String(after)))
         }
         let url = try makeURL(path: "/api/v1/logs", queryItems: items)
-        var request = URLRequest(url: url)
+        var request = URLRequest(authorizedURL: url)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
@@ -241,7 +241,7 @@ enum LogsAPI {
         onEntry: (LogEntry) -> Void
     ) async throws {
         let url = try webSocketURL(filter: filter, after: after)
-        let socket = URLSession.shared.webSocketTask(with: url)
+        let socket = URLSession.shared.authorizedWebSocketTask(with: url)
         socket.resume()
 
         let decoder = JSONDecoder()
