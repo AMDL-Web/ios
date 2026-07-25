@@ -41,7 +41,6 @@ struct CreateDownloadIntent: AppIntent {
         let mediaUserToken = try await currentMediaUserToken()
         let response = try await DownloadsAPI.createDownload(
             input: url.absoluteString,
-            forceOverwrite: false,
             mediaUserToken: mediaUserToken
         )
 

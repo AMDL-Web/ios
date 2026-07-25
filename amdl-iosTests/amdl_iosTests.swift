@@ -543,6 +543,21 @@ struct amdl_iosTests {
         try assert(overrides?["media_user_token"] == nil, "logged-out request should omit token")
     }
 
+    /// 不传 forceOverwrite 时必须整个键都不出现：后端只要看到
+    /// overrides.force_overwrite 就会用它覆盖全局的 download.force_overwrite，
+    /// 发一个 false 出去等于把「总配置里开的覆盖」永久顶掉。
+    @Test func downloadCreateRequestOmitsForceOverwriteWhenUnset() throws {
+        let request = DownloadCreateRequest(
+            input: "https://music.apple.com/cn/album/example/1",
+            forceOverwrite: nil,
+            mediaUserToken: nil
+        )
+        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        let overrides = object?["overrides"] as? [String: Any]
+
+        try assert(overrides?["force_overwrite"] == nil, "unset force overwrite must be omitted entirely")
+    }
+
     @Test func downloadCreateRequestIncludesAuthorizedUserToken() throws {
         let request = DownloadCreateRequest(
             input: "https://music.apple.com/cn/station/example/ra.1",

@@ -660,7 +660,11 @@ struct DownloadCreateRequest: Encodable {
     let urls: [String]
     let overrides: DownloadCreateOverrides
 
-    init(input: String, forceOverwrite: Bool, mediaUserToken: String?) {
+    /// forceOverwrite 传 nil 表示「不覆盖这一项」，请求里就不会出现
+    /// overrides.force_overwrite，后端于是沿用运行时配置 download.force_overwrite。
+    /// 之前它是非可选的，每次提交都会发一个 false 出去，把全局设置顶掉——
+    /// 表现就是「总配置里开了覆盖却不生效，只有下载时勾选才有用」。
+    init(input: String, forceOverwrite: Bool?, mediaUserToken: String?) {
         urls = [input]
         overrides = DownloadCreateOverrides(
             forceOverwrite: forceOverwrite,
@@ -670,7 +674,7 @@ struct DownloadCreateRequest: Encodable {
 }
 
 struct DownloadCreateOverrides: Encodable {
-    let forceOverwrite: Bool
+    let forceOverwrite: Bool?
     let mediaUserToken: String?
 
     enum CodingKeys: String, CodingKey {
@@ -791,7 +795,7 @@ enum DownloadsAPI {
 
     static func createDownload(
         input: String,
-        forceOverwrite: Bool,
+        forceOverwrite: Bool? = nil,
         mediaUserToken: String?
     ) async throws -> DownloadSubmitResponse {
         let url = try makeURL(path: "/api/v1/downloads")

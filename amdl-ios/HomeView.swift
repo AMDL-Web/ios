@@ -11,7 +11,6 @@ struct HomeView: View {
     let onSubmitted: (String?) -> Void
 
     @State private var input = ""
-    @State private var forceOverwrite = false
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @FocusState private var inputFocused: Bool
@@ -22,44 +21,54 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("下载链接") {
-                    TextField("Apple Music 链接", text: $input, axis: .vertical)
-                        .lineLimit(3...8)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .focused($inputFocused)
-                }
+            // 只有一个输入框和一个按钮，用 Form 的分组列表会把它们钉在顶部、
+            // 中间留一大片空白。改成居中的 VStack，上下用 Spacer 撑开。
+            VStack(spacing: 20) {
+                Spacer(minLength: 0)
 
-                Section("任务选项") {
-                    Toggle("覆盖已有文件", isOn: $forceOverwrite)
-                }
+                TextField("Apple Music 链接", text: $input, axis: .vertical)
+                    .lineLimit(3...8)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($inputFocused)
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(.secondarySystemGroupedBackground))
+                    )
 
-                Section {
-                    Button(action: submitButtonTapped) {
-                        HStack {
-                            Spacer()
-                            if isSubmitting {
-                                ProgressView()
-                            } else {
-                                Label("提交下载", systemImage: "arrow.down.circle.fill")
-                            }
-                            Spacer()
+                Button(action: submitButtonTapped) {
+                    HStack {
+                        Spacer()
+                        if isSubmitting {
+                            ProgressView()
+                        } else {
+                            Label("提交下载", systemImage: "arrow.down.circle.fill")
                         }
+                        Spacer()
                     }
-                    .disabled(isSubmitting || trimmedInput.isEmpty)
+                    .padding(.vertical, 12)
                 }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSubmitting || trimmedInput.isEmpty)
 
                 if let errorMessage {
-                    Section {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
                 }
+
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemGroupedBackground))
             .pageLargeTitle("新建下载")
+            // 点空白处收起键盘——没有列表可滚动时，键盘会一直挡着按钮。
+            .contentShape(Rectangle())
+            .onTapGesture { inputFocused = false }
         }
     }
 
@@ -77,9 +86,10 @@ struct HomeView: View {
 
         do {
             let mediaUserToken = try await currentMediaUserToken()
+            // 不传 forceOverwrite：请求里不带 overrides.force_overwrite，
+            // 后端沿用运行时配置 download.force_overwrite。
             let response = try await DownloadsAPI.createDownload(
                 input: trimmedInput,
-                forceOverwrite: forceOverwrite,
                 mediaUserToken: mediaUserToken
             )
 
