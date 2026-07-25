@@ -153,6 +153,11 @@ jobs:
           APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
         run: |
           set -o pipefail
+          # 工程没有显式设置 CODE_SIGN_IDENTITY，Xcode 对 iOS 的默认值是
+          # "Apple Development"，于是归档会去找开发证书和 iOS App Development
+          # 描述文件——而 runner 上只导入了分发证书，必然失败。这里显式指定分发
+          # 身份，让 -allowProvisioningUpdates 去创建 App Store 描述文件
+          # （主 App 与两个扩展各一个）。
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -162,7 +167,10 @@ jobs:
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8 \
             -authenticationKeyID "$APPSTORE_KEY_ID" \
-            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID"
+            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            DEVELOPMENT_TEAM=2VTXNMR2GL
 
       - name: Export ipa
         env:
