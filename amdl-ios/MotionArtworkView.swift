@@ -19,11 +19,9 @@ import UIKit
 /// 下面的 [JobArtworkView] 原样露出。
 struct MotionArtworkView: View {
     let job: Job
-    /// 只有方形模式才在静态封面上叠这一层；竖版模式走 [MotionArtworkTallHeader]。
-    var style: MotionArtworkStyle = .square
 
     var body: some View {
-        if style == .square, let url = job.motionArtworkVideoURL(style: .square) {
+        if let url = job.motionArtworkVideoURL {
             MotionArtworkPlayer(url: url)
         }
     }
@@ -177,9 +175,13 @@ private struct MotionArtworkPlayerLayer: UIViewRepresentable {
             guard let item else { return }
             // IOSurface 属性是关键：拿到的 pixel buffer 才能直接当 layer.contents，
             // 省掉每帧一次 CIImage→CGImage 的软件转换。
+            // IOSurface 属性写成空字典即可（要的就是"启用 IOSurface 支持"）。
+            // 字面量在 Swift 6 下会被推断成非 Sendable 的 Any，显式标成
+            // [String: Int] 这种具体 Sendable 类型可以既满足 API 又不触发告警。
+            let surfaceProperties: [String: Int] = [:]
             let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as CFDictionary,
+                kCVPixelBufferIOSurfacePropertiesKey as String: surfaceProperties,
             ])
             item.add(output)
             videoOutput = output
