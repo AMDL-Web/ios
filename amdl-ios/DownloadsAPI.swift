@@ -650,8 +650,13 @@ struct DownloadEvent: Codable {
     /// `resolved_input` is only a marker. The backend persists title, artwork
     /// and item metadata before/around this event but does not include them in
     /// its payload, so the detail screen must refresh its snapshot once.
+    /// 这些事件改的是任务行本身，光靠事件负载补不齐，必须重新拉一次快照。
+    ///
+    /// motion_artwork_resolved 尤其容易漏：它落在 apply 的 default 分支里被忽略，
+    /// 若不在这里点名，详情页开着的时候动态封面到了也不会替换——只有退出重进才看
+    /// 得到。
     var requiresDetailSnapshotRefresh: Bool {
-        type == "resolved_input"
+        type == "resolved_input" || type == "motion_artwork_resolved"
     }
 
     struct ItemCompletedPayload: Codable {
