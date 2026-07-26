@@ -9,8 +9,6 @@ struct DownloadSongDetailContent: View {
     let job: Job?
     let items: [JobItem]
     let progress: Double
-    var downloadSpeed: Double = 0
-    var decryptSpeed: Double = 0
     let errorMessage: String?
     let palette: DownloadDetailPalette?
     @Binding var presentedQualityDetails: AudioQualityPresentation.Details?
@@ -31,8 +29,6 @@ struct DownloadSongDetailContent: View {
                             job: job,
                             items: items,
                             progress: progress,
-                            downloadSpeed: downloadSpeed,
-                            decryptSpeed: decryptSpeed,
                             albumTracksOmitSubtitles: false,
                             palette: palette,
                             presentedQualityDetails: $presentedQualityDetails
@@ -51,8 +47,6 @@ struct DownloadDetailSummaryView: View {
     let job: Job
     let items: [JobItem]
     let progress: Double
-    var downloadSpeed: Double = 0
-    var decryptSpeed: Double = 0
     let albumTracksOmitSubtitles: Bool
     let palette: DownloadDetailPalette?
     @Binding var presentedQualityDetails: AudioQualityPresentation.Details?
@@ -105,12 +99,6 @@ struct DownloadDetailSummaryView: View {
 
     private var barProgress: Double {
         job.status == .completed ? 1 : progress
-    }
-
-    /// 仅在任务活跃且确实有速度可估时展示速度行，避免终态或 AAC-LC（无码率
-    /// 可估）时留一行空占位。
-    private var showsSpeedReadout: Bool {
-        job.status.isActive && (downloadSpeed > 0 || decryptSpeed > 0)
     }
 
     var body: some View {
@@ -169,25 +157,6 @@ struct DownloadDetailSummaryView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(palette?.secondaryText ?? Color.secondary)
 
-                if showsSpeedReadout {
-                    HStack(spacing: 12) {
-                        if downloadSpeed > 0 {
-                            Label(
-                                TransferSpeedFormat.string(bytesPerSecond: downloadSpeed),
-                                systemImage: "arrow.down"
-                            )
-                        }
-                        if decryptSpeed > 0 {
-                            Label(
-                                TransferSpeedFormat.string(bytesPerSecond: decryptSpeed),
-                                systemImage: "lock.open"
-                            )
-                        }
-                        Spacer()
-                    }
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(palette?.tertiaryText ?? Color.secondary)
-                }
             }
             .padding(.horizontal, 24)
             .padding(.top, 8)

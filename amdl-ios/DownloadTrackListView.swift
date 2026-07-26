@@ -27,8 +27,6 @@ struct DownloadTrackListView: View {
     let job: Job?
     let items: [JobItem]
     let progress: Double
-    var downloadSpeed: Double = 0
-    var decryptSpeed: Double = 0
     let isLoading: Bool
     let hasLoadedDetail: Bool
     let errorMessage: String?
@@ -86,8 +84,6 @@ struct DownloadTrackListView: View {
                         job: job,
                         items: items,
                         progress: progress,
-                        downloadSpeed: downloadSpeed,
-                        decryptSpeed: decryptSpeed,
                         albumTracksOmitSubtitles: albumTracksOmitSubtitles,
                         palette: palette,
                         presentedQualityDetails: $presentedQualityDetails

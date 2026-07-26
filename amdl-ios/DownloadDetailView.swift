@@ -25,7 +25,6 @@ struct DownloadDetailView: View {
     @State private var errorMessage: String?
     @State private var lastEventID: Int64 = 0
     @State private var presentedQualityDetails: AudioQualityPresentation.Details?
-    @State private var speedTracker = TaskSpeedTracker()
     private var job: Job? {
         detail?.job ?? initialJob
     }
@@ -85,8 +84,6 @@ struct DownloadDetailView: View {
                     job: job,
                     items: items,
                     progress: progress,
-                    downloadSpeed: speedTracker.downloadBytesPerSecond,
-                    decryptSpeed: speedTracker.decryptBytesPerSecond,
                     errorMessage: errorMessage,
                     palette: palette,
                     presentedQualityDetails: $presentedQualityDetails
@@ -96,8 +93,6 @@ struct DownloadDetailView: View {
                     job: job,
                     items: items,
                     progress: progress,
-                    downloadSpeed: speedTracker.downloadBytesPerSecond,
-                    decryptSpeed: speedTracker.decryptBytesPerSecond,
                     isLoading: isLoading,
                     hasLoadedDetail: detail != nil,
                     errorMessage: errorMessage,
@@ -165,14 +160,12 @@ struct DownloadDetailView: View {
     }
 
     private func runDetailLifecycle() async {
-        speedTracker.reset()
         if let cachedData = await DownloadDetailCache.shared.loadData(jobID: jobID),
            var cached = try? JSONDecoder().decode(DownloadDetail.self, from: cachedData) {
             if let initialJob {
                 cached.job.preservePresentationMetadata(from: initialJob)
             }
             detail = cached
-            speedTracker.update(with: cached.items)
             lastEventID = max(lastEventID, cached.lastEventID ?? 0)
         }
         let hasCache = detail != nil
@@ -204,7 +197,6 @@ struct DownloadDetailView: View {
 
                         // 每条推送落地后重算聚合速度，刷新频率即跟随推送频率。
                         if let detail {
-                            speedTracker.update(with: detail.items)
                         }
 
                         if event.requiresDetailSnapshotRefresh {
@@ -257,7 +249,6 @@ struct DownloadDetailView: View {
                     snapshot.job.preservePresentationMetadata(from: initialJob)
                 }
                 detail = snapshot
-                speedTracker.update(with: snapshot.items)
                 await DownloadLiveActivityManager.shared.refreshFromDetail(snapshot)
                 guard !Task.isCancelled else { return }
                 lastEventID = max(lastEventID, snapshotEventID)
