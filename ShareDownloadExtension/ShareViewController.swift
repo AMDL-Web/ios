@@ -524,10 +524,65 @@ private struct ShareJob: Decodable {
     }
 }
 
+/// 后端 `JobItem.progress` 的逐阶段拆分，本扩展自用的最小镜像。
+///
+/// 权重刻意与 app target 里 `ItemProgress`（DownloadsAPI.swift）保持一致，改一处
+/// 要同时改另一处：`LiveActivityShared/` 没有加入本扩展的 target 成员，import
+/// 不到那份定义，而单为一个共享结构体把整个共享目录（连同 ActivityKit 依赖）
+/// 拉进来并不划算。
+private struct ShareItemProgress: Decodable {
+    var download: Double = 0
+    var decrypt: Double = 0
+    var resolved: Bool = false
+    var remuxed: Bool = false
+    var verified: Bool = false
+    var tagged: Bool = false
+    var saved: Bool = false
+
+    private enum Weight {
+        static let resolved = 0.04
+        static let download = 0.56
+        static let decrypt = 0.26
+        static let remuxed = 0.06
+        static let verified = 0.03
+        static let tagged = 0.03
+    }
+
+    // 自定义 init(from:) 后 Decodable 不再合成 CodingKeys，得自己写。
+    private enum CodingKeys: String, CodingKey {
+        case download, decrypt, resolved, remuxed, verified, tagged, saved
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        download = try container.decodeIfPresent(Double.self, forKey: .download) ?? 0
+        decrypt = try container.decodeIfPresent(Double.self, forKey: .decrypt) ?? 0
+        resolved = try container.decodeIfPresent(Bool.self, forKey: .resolved) ?? false
+        remuxed = try container.decodeIfPresent(Bool.self, forKey: .remuxed) ?? false
+        verified = try container.decodeIfPresent(Bool.self, forKey: .verified) ?? false
+        tagged = try container.decodeIfPresent(Bool.self, forKey: .tagged) ?? false
+        saved = try container.decodeIfPresent(Bool.self, forKey: .saved) ?? false
+    }
+
+    init() {}
+
+    var fraction: Double {
+        if saved { return 1 }
+        var value = 0.0
+        if resolved { value += Weight.resolved }
+        value += Weight.download * min(max(download, 0), 1)
+        value += Weight.decrypt * min(max(decrypt, 0), 1)
+        if remuxed { value += Weight.remuxed }
+        if verified { value += Weight.verified }
+        if tagged { value += Weight.tagged }
+        return min(max(value, 0), 1)
+    }
+}
+
 private struct ShareJobItem: Decodable {
     let artworkURL: String?
     let status: ShareJobItemStatus
-    let progress: Double
+    let progress: ShareItemProgress
     let statusMessage: String?
 
     enum CodingKeys: String, CodingKey {
@@ -536,8 +591,14 @@ private struct ShareJobItem: Decodable {
         case statusMessage = "status_message"
     }
 
+    /// 终态直接算满格：`skipped_existing` 的拆分全是零值，因为它一个阶段都没跑。
     var normalizedProgress: Double {
-        min(max(progress, 0), 1)
+        switch status {
+        case .completed, .skippedExisting:
+            1
+        default:
+            progress.fraction
+        }
     }
 
     var resolvedArtworkURL: URL? {

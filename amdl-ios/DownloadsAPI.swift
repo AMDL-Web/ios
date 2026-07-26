@@ -320,6 +320,92 @@ enum JobItemStatus: String, Codable {
     }
 }
 
+/// 后端 `JobItem.progress` 的逐阶段拆分。取代了此前那个跨整条流水线的
+/// 单一 0..1 总进度：下载和解密曾被压进同一根轴的两段子区间（5–55% 与
+/// 55–90%），原子阶段则只是轴上的固定点 —— 0.97 从来不是「标签写了 97%」，
+/// 只是「开始写标签」。
+///
+/// 后端现在不再给总进度，`fraction` 里的加权纯粹是本客户端的展示决定。
+struct ItemProgress: Codable, Equatable, Sendable {
+    /// 加密媒体已传输的比例。传输不可测量时（响应没有 Content-Length）恒为 0，
+    /// 所以 0 配上 status=downloading 意思是「正在下载，大小未知」，不是「一个字节都没下」。
+    var download: Double = 0
+    /// 已送进解密器的字节比例。aac-lc 走的是一次性解密，中间没有可报的计数，
+    /// 那条路径上它会在封装边界从 0 直接跳到 1。
+    var decrypt: Double = 0
+    /// 目录元数据已取得。
+    var resolved: Bool = false
+    /// 解密流已展平成 progressive MP4。
+    var remuxed: Bool = false
+    /// 完整性校验已执行且通过。后端 `download.check_integrity` 关闭时同样为 false，
+    /// 所以 false 只表示「未校验」，绝不表示「文件损坏」—— 校验失败会直接让整项失败。
+    /// 这是已完成项目唯一可以合理留 false 的标志。
+    var verified: Bool = false
+    /// 元数据（以及按配置的封面／歌词）已写入文件。
+    var tagged: Bool = false
+    /// 成品文件已移动到最终路径。这是流水线最后一步，为真即整项完成。
+    var saved: Bool = false
+
+    /// 契约里这些字段都是必填的，但仍然逐个容错解码：后端和 App 不是同时发版的，
+    /// 缺一个字段应该退化成「那个阶段没完成」，而不是让整个 JobItem 解不出来。
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        download = try container.decodeIfPresent(Double.self, forKey: .download) ?? 0
+        decrypt = try container.decodeIfPresent(Double.self, forKey: .decrypt) ?? 0
+        resolved = try container.decodeIfPresent(Bool.self, forKey: .resolved) ?? false
+        remuxed = try container.decodeIfPresent(Bool.self, forKey: .remuxed) ?? false
+        verified = try container.decodeIfPresent(Bool.self, forKey: .verified) ?? false
+        tagged = try container.decodeIfPresent(Bool.self, forKey: .tagged) ?? false
+        saved = try container.decodeIfPresent(Bool.self, forKey: .saved) ?? false
+    }
+
+    init() {}
+}
+
+extension ItemProgress {
+    /// 各阶段在单根进度条上占的比重，合计为 1。
+    ///
+    /// 大体沿用旧后端那套轴的手感（下载占大头，解密次之，收尾几步各占一点），
+    /// 但按实测把两者的比例调开了：解密比下载快，旧的 50% / 35% 让进度条在解密
+    /// 阶段走得明显偏快。这里收到 56% / 26%，收尾阶段相应各分到一点。
+    private enum Weight {
+        static let resolved = 0.04
+        static let download = 0.56
+        static let decrypt = 0.26
+        static let remuxed = 0.06
+        static let verified = 0.03
+        static let tagged = 0.03
+        static let saved = 0.02
+    }
+
+    /// 折算成单根进度条用的 0..1。
+    var fraction: Double {
+        // saved 是流水线最后一步，为真即全部走完。直接短路还顺带吸收掉
+        // check_integrity 关闭时 verified 永远为 false 留下的那 3%。
+        if saved { return 1 }
+        var value = 0.0
+        if resolved { value += Weight.resolved }
+        value += Weight.download * min(max(download, 0), 1)
+        value += Weight.decrypt * min(max(decrypt, 0), 1)
+        if remuxed { value += Weight.remuxed }
+        if verified { value += Weight.verified }
+        if tagged { value += Weight.tagged }
+        return min(max(value, 0), 1)
+    }
+
+    /// 整项完成时的形态：两个 meter 拉满，除 verified 外的阶段全部置位。
+    /// verified 保持原样 —— 后端在 check_integrity 关闭时本来就不会置它，
+    /// 这里替它置上就是在编造历史。
+    mutating func markCompleted() {
+        download = 1
+        decrypt = 1
+        resolved = true
+        remuxed = true
+        tagged = true
+        saved = true
+    }
+}
+
 struct JobItem: Codable, Identifiable {
     let id: String
     let jobID: String
@@ -334,7 +420,7 @@ struct JobItem: Codable, Identifiable {
     var durationMs: Int?
     var artworkURL: String?
     var status: JobItemStatus
-    var progress: Double
+    var progress: ItemProgress
     var codec: String?
     /// 当前尝试编码的位深，仅无损编码（如 ALAC）有值；AAC-LC 等有损编码没有逐曲清单可读，恒为空。
     var bitDepth: Int?
@@ -342,6 +428,9 @@ struct JobItem: Codable, Identifiable {
     var sampleRate: Int?
     /// 码率（bps）；无损编码取自 HLS 分片声明的平均带宽，并非真实恒定码率。
     var bitrate: Int?
+    /// 成品文件字节数，落盘（completed）或发现已存在（skipped_existing）后才有值；
+    /// 在此之前、旧后端、以及 stat 失败时为空。重试会把它清回 0。
+    var fileSize: Int64?
     var retryKind: String?
     var attempt: Int?
     var maxAttempts: Int?
@@ -359,6 +448,7 @@ struct JobItem: Codable, Identifiable {
         case bitDepth = "bit_depth"
         case sampleRate = "sample_rate"
         case bitrate
+        case fileSize = "file_size"
         case retryKind = "retry_kind"
         case attempt
         case maxAttempts = "max_attempts"
@@ -367,8 +457,15 @@ struct JobItem: Codable, Identifiable {
         case updatedAt = "updated_at"
     }
 
+    /// 单根进度条用的 0..1。终态直接返回 1：`skipped_existing` 的文件本来就在盘上，
+    /// 一个阶段都没跑，拆分里全是零值 —— 判断是否完成看 status，不看 progress。
     var clampedProgress: Double {
-        min(max(progress, 0), 1)
+        switch status {
+        case .completed, .skippedExisting:
+            1
+        default:
+            progress.fraction
+        }
     }
 
     var displayTitle: String {
@@ -546,7 +643,7 @@ struct DownloadDetail: Codable {
         case "item_completed":
             mutateItem(id: event.itemID) { item in
                 item.status = .completed
-                item.progress = 1
+                item.progress.markCompleted()
                 item.statusMessage = nil
                 item.error = nil
                 if let payload = event.decodeItemCompletedPayload() {
@@ -554,6 +651,8 @@ struct DownloadDetail: Codable {
                     item.bitDepth = payload.bitDepth ?? item.bitDepth
                     item.sampleRate = payload.sampleRate ?? item.sampleRate
                     item.bitrate = payload.bitrate ?? item.bitrate
+                    // 落盘大小只在这条事件里第一次出现（item_progress 期间文件还没写完）。
+                    item.fileSize = payload.fileSize ?? item.fileSize
                     // attempt/max_attempts 不再从完成事件合并：后端 payload 改为
                     // download_attempts/decrypt_attempts 两个独立字段，而 item 的
                     // attempt 状态已通过 item_progress 全量载荷保持最新。
@@ -563,8 +662,12 @@ struct DownloadDetail: Codable {
         case "item_skipped":
             mutateItem(id: event.itemID) { item in
                 item.status = .skippedExisting
-                item.progress = 1
+                // 拆分保持零值，跟后端一致：跳过的项目一个阶段都没跑。
+                // 进度条由 clampedProgress 按 status 判定为满格。
                 item.statusMessage = nil
+                if let fileSize = event.decodeItemSkippedPayload()?.fileSize {
+                    item.fileSize = fileSize
+                }
             }
 
         case "item_failed":
@@ -664,6 +767,7 @@ struct DownloadEvent: Codable {
         let bitDepth: Int?
         let sampleRate: Int?
         let bitrate: Int?
+        let fileSize: Int64?
         let downloadAttempts: Int?
         let decryptAttempts: Int?
 
@@ -671,8 +775,18 @@ struct DownloadEvent: Codable {
             case codec, bitrate
             case bitDepth = "bit_depth"
             case sampleRate = "sample_rate"
+            case fileSize = "file_size"
             case downloadAttempts = "download_attempts"
             case decryptAttempts = "decrypt_attempts"
+        }
+    }
+
+    /// item_skipped 的 payload 同样是整条 item 快照，只取落盘大小即可。
+    struct ItemSkippedPayload: Codable {
+        let fileSize: Int64?
+
+        enum CodingKeys: String, CodingKey {
+            case fileSize = "file_size"
         }
     }
 
@@ -684,6 +798,11 @@ struct DownloadEvent: Codable {
     func decodeItemCompletedPayload() -> ItemCompletedPayload? {
         guard let data = payload?.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(ItemCompletedPayload.self, from: data)
+    }
+
+    func decodeItemSkippedPayload() -> ItemSkippedPayload? {
+        guard let data = payload?.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(ItemSkippedPayload.self, from: data)
     }
 }
 

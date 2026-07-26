@@ -105,7 +105,10 @@ struct amdl_iosTests {
               "artwork_url": "https://example.com/track/{w}x{h}.{f}",
               "duration_ms": 245000,
               "status": "downloading",
-              "progress": 0.5,
+              "progress": {
+                "download": 0.5, "decrypt": 0, "resolved": true,
+                "remuxed": false, "verified": false, "tagged": false, "saved": false
+              },
               "codec": "alac",
               "status_message": "Downloading 50%",
               "created_at": "2026-07-06T07:53:43.446396Z",
@@ -118,7 +121,10 @@ struct amdl_iosTests {
               "kind": "song",
               "index": 2,
               "status": "completed",
-              "progress": 1,
+              "progress": {
+                "download": 1, "decrypt": 1, "resolved": true,
+                "remuxed": true, "verified": true, "tagged": true, "saved": true
+              },
               "created_at": "2026-07-06T07:53:43Z",
               "updated_at": "2026-07-06T07:53:50Z"
             },
@@ -129,7 +135,10 @@ struct amdl_iosTests {
               "kind": "song",
               "index": 3,
               "status": "skipped_existing",
-              "progress": 1,
+              "progress": {
+                "download": 0, "decrypt": 0, "resolved": false,
+                "remuxed": false, "verified": false, "tagged": false, "saved": false
+              },
               "created_at": "2026-07-06T07:53:43Z",
               "updated_at": "2026-07-06T07:53:50Z"
             }
@@ -149,7 +158,13 @@ struct amdl_iosTests {
         try assert(detail.items[2].status == .skippedExisting, "skipped status")
         try assert(detail.items[0].durationMs == 245000, "first item duration")
         try assert(detail.items[1].durationMs == nil, "missing duration decodes to nil")
-        try assert(detail.progress == (0.5 + 1 + 1) / 3, "detail progress")
+        // 第一项在下载中途：resolved 的 4% 加上 download 那 56% 的一半。
+        // 后两项是终态，clampedProgress 按 status 直接算满格 —— 第三项被跳过，
+        // 拆分里全是零值，正是这里要盯住的地方。
+        let firstItemFraction = 0.04 + 0.56 * 0.5
+        try assert(abs(detail.items[0].clampedProgress - firstItemFraction) < 1e-9, "first item fraction")
+        try assert(detail.items[2].clampedProgress == 1, "skipped item reads as complete")
+        try assert(abs(detail.progress - (firstItemFraction + 1 + 1) / 3) < 1e-9, "detail progress")
     }
 
     @Test func trackDurationSummaryFormatsAdaptiveUnits() throws {
@@ -244,7 +259,7 @@ struct amdl_iosTests {
         refreshed.job.genre = nil
         refreshed.job.artworkBgColor = nil
         refreshed.items[0].status = .completed
-        refreshed.items[0].progress = 1
+        refreshed.items[0].progress.markCompleted()
         refreshed.items[0].title = nil
         refreshed.items[0].artist = nil
         refreshed.items[0].album = nil
@@ -334,7 +349,8 @@ struct amdl_iosTests {
           },
           "items": [{
             "id": "item_1", "job_id": "job_1", "adam_id": "1", "kind": "song", "index": 1,
-            "title": "Track", "status": "downloading", "progress": 0.9,
+            "title": "Track", "status": "downloading",
+            "progress": {"download": 0.9, "decrypt": 0, "resolved": true, "remuxed": false, "verified": false, "tagged": false, "saved": false},
             "created_at": "2026-07-20T00:00:00Z", "updated_at": "2026-07-20T00:00:00Z"
           }],
           "last_event_id": 10
@@ -361,6 +377,76 @@ struct amdl_iosTests {
         try assert(detail.items[0].bitrate == 2_304_000, "completed bitrate")
     }
 
+    // MARK: - 详细信息
+
+    /// 「详细信息」的全部价值在于补充，重复就没有存在意义。集合任务的底注已经写了
+    /// 发行日期、曲目数和创建时间，曲目行也各带音质徽标，所以这些都不能再出现。
+    @Test func detailInfoOmitsWhatTheCollectionPageAlreadyShows() throws {
+        var job = albumJob(input: "https://music.apple.com/cn/playlist/example/pl.1", type: .playlist)
+        job.releaseDate = "2024-03-15"
+        let item = try qualityItem(codec: "aac-lc", bitDepth: nil, sampleRate: nil, bitrate: 256_000)
+        let labels = DownloadDetailInfo.sections(job: job, items: [item], hooks: [])
+            .flatMap { section in section.rows.map(\.label) }
+
+        try assert(!labels.contains("发行日期"), "footer already carries the release date")
+        try assert(!labels.contains("创建时间"), "footer already carries the created timestamp")
+        try assert(!labels.contains("时长"), "footer already carries the total duration")
+        try assert(!labels.contains("编码"), "playlist track rows already carry quality badges")
+        try assert(labels.contains("更新时间"), "updated timestamp is shown nowhere else")
+        try assert(labels.contains("任务 ID"), "job id is shown nowhere else")
+    }
+
+    /// 单曲页只有一张概览卡：没有曲目行也没有底注，所以那部分曲目信息要补齐。
+    /// AAC 又不产生音质徽标，四项参数在页面上同样无处可看。
+    @Test func detailInfoFillsWhatTheSongPageHasNoRoomFor() throws {
+        var detail = try songDetail(status: "completed", itemStatus: "completed")
+        detail.job.releaseDate = "2024-03-15"
+        detail.items[0].durationMs = 245_000
+        detail.items[0].fileSize = 9_800_000
+        detail.items[0].codec = "aac-lc"
+        detail.items[0].bitrate = 256_000
+
+        let rows = DownloadDetailInfo.sections(job: detail.job, items: detail.items, hooks: [])
+            .flatMap(\.rows)
+        let value = { (label: String) in rows.first { $0.label == label }?.value }
+
+        try assert(value("专辑") == "Album", "song page never shows the album name")
+        try assert(value("时长") == "4:05", "song page never shows the duration")
+        // 概览的说明行只给到年份，这里要给出完整日期（长格式随语言环境变，
+        // 只断言它确实被解析并重排过，而不是把后端的 YYYY-MM-DD 原样贴出来）。
+        try assert(value("发行日期")?.contains("2024") == true, "song page only shows the year")
+        try assert(value("发行日期") != "2024-03-15", "raw backend date should be reformatted")
+        try assert(value("创建时间") != nil, "song page has no footer timestamp")
+        try assert(value("编码") == "AAC-LC", "no badge means no other way to see the codec")
+        try assert(value("码率") == "256 kbps", "no badge means no other way to see the bitrate")
+        try assert(value("位深度") == nil, "an unavailable field is dropped, not spelled out")
+        try assert(value("原始链接") == detail.job.input, "the copy-link payload is never displayed")
+    }
+
+    /// 无损单曲的概览带徽标，点一下就是这四项——那就别在表里再列一遍。
+    @Test func detailInfoDefersToTheQualityBadgeWhenThereIsOne() throws {
+        var detail = try songDetail(status: "completed", itemStatus: "completed")
+        detail.items[0].codec = "alac"
+        detail.items[0].bitDepth = 24
+        detail.items[0].sampleRate = 96_000
+
+        let labels = DownloadDetailInfo.sections(job: detail.job, items: detail.items, hooks: [])
+            .flatMap { section in section.rows.map(\.label) }
+
+        try assert(!labels.contains("编码"), "the hi-res badge already opens the quality alert")
+        try assert(!labels.contains("采样率"), "the hi-res badge already opens the quality alert")
+    }
+
+    /// hook 结果跟着详情快照下发，却是详情页唯一从头到尾没展示过的东西。
+    @Test func detailInfoSurfacesHookResults() throws {
+        let detail = try songDetail(status: "failed", itemStatus: "failed")
+        let hooks = [HookState(name: "notify", status: "failed", error: "connection refused")]
+        let rows = DownloadDetailInfo.sections(job: detail.job, items: detail.items, hooks: hooks)
+            .flatMap(\.rows)
+
+        try assert(rows.first { $0.label == "notify" }?.value == "失败：connection refused", "hook result")
+    }
+
     private func qualityItem(
         codec: String?,
         bitDepth: Int?,
@@ -375,7 +461,10 @@ struct amdl_iosTests {
             "index": 1,
             "title": "Track",
             "status": "completed",
-            "progress": 1,
+            "progress": [
+                "download": 1, "decrypt": 1, "resolved": true,
+                "remuxed": true, "verified": true, "tagged": true, "saved": true
+            ],
             "created_at": "2026-07-20T00:00:00Z",
             "updated_at": "2026-07-20T00:00:00Z"
         ]
@@ -403,7 +492,10 @@ struct amdl_iosTests {
           "items": [{
             "id": "song_item", "job_id": "song_job", "adam_id": "1", "kind": "song", "index": 1,
             \(metadata)
-            "status": "\(itemStatus)", "progress": \(itemStatus == "completed" ? 1 : 0.5),
+            "status": "\(itemStatus)",
+            "progress": \(itemStatus == "completed"
+                ? #"{"download": 1, "decrypt": 1, "resolved": true, "remuxed": true, "verified": true, "tagged": true, "saved": true}"#
+                : #"{"download": 0.5, "decrypt": 0, "resolved": true, "remuxed": false, "verified": false, "tagged": false, "saved": false}"#),
             "created_at": "2026-07-20T00:00:00Z", "updated_at": "2026-07-20T00:00:00Z"
           }]
         }
@@ -493,7 +585,8 @@ struct amdl_iosTests {
           },
           "items": [{
             "id": "item_1", "job_id": "job_1", "adam_id": "1", "kind": "song", "index": 1,
-            "status": "downloading", "progress": 0.5,
+            "status": "downloading",
+            "progress": {"download": 0.5, "decrypt": 0, "resolved": true, "remuxed": false, "verified": false, "tagged": false, "saved": false},
             "created_at": "2026-07-20T00:00:00Z", "updated_at": "2026-07-20T00:00:00Z"
           }],
           "last_event_id": 10
