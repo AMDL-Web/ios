@@ -94,6 +94,18 @@ struct Job: Codable, Identifiable {
     /// motion_artwork_resolved 事件）。空就当作「没有动态封面」。
     var motionArtworkURL: String? = nil
     var motionArtworkTallURL: String? = nil
+    /// 每个动态变体自带一套调色板（取自它自己的 previewFrame），**不是**静态封面
+    /// 那套。展示哪个资产就用哪套，混用会得到深底深字。
+    var motionArtworkBgColor: String? = nil
+    var motionArtworkTextColor1: String? = nil
+    var motionArtworkTextColor2: String? = nil
+    var motionArtworkTextColor3: String? = nil
+    var motionArtworkTextColor4: String? = nil
+    var motionArtworkTallBgColor: String? = nil
+    var motionArtworkTallTextColor1: String? = nil
+    var motionArtworkTallTextColor2: String? = nil
+    var motionArtworkTallTextColor3: String? = nil
+    var motionArtworkTallTextColor4: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, input, type, storefront, title, force, status, error, genre
@@ -113,6 +125,16 @@ struct Job: Codable, Identifiable {
         case artworkTextColor4 = "artwork_text_color4"
         case motionArtworkURL = "motion_artwork_url"
         case motionArtworkTallURL = "motion_artwork_tall_url"
+        case motionArtworkBgColor = "motion_artwork_bg_color"
+        case motionArtworkTextColor1 = "motion_artwork_text_color1"
+        case motionArtworkTextColor2 = "motion_artwork_text_color2"
+        case motionArtworkTextColor3 = "motion_artwork_text_color3"
+        case motionArtworkTextColor4 = "motion_artwork_text_color4"
+        case motionArtworkTallBgColor = "motion_artwork_tall_bg_color"
+        case motionArtworkTallTextColor1 = "motion_artwork_tall_text_color1"
+        case motionArtworkTallTextColor2 = "motion_artwork_tall_text_color2"
+        case motionArtworkTallTextColor3 = "motion_artwork_tall_text_color3"
+        case motionArtworkTallTextColor4 = "motion_artwork_tall_text_color4"
     }
 
     var progress: Double {
@@ -180,6 +202,16 @@ struct Job: Codable, Identifiable {
             motionArtworkTallURL,
             fallback: fallback.motionArtworkTallURL
         )
+        motionArtworkBgColor = preferredPresentationValue(motionArtworkBgColor, fallback: fallback.motionArtworkBgColor)
+        motionArtworkTextColor1 = preferredPresentationValue(motionArtworkTextColor1, fallback: fallback.motionArtworkTextColor1)
+        motionArtworkTextColor2 = preferredPresentationValue(motionArtworkTextColor2, fallback: fallback.motionArtworkTextColor2)
+        motionArtworkTextColor3 = preferredPresentationValue(motionArtworkTextColor3, fallback: fallback.motionArtworkTextColor3)
+        motionArtworkTextColor4 = preferredPresentationValue(motionArtworkTextColor4, fallback: fallback.motionArtworkTextColor4)
+        motionArtworkTallBgColor = preferredPresentationValue(motionArtworkTallBgColor, fallback: fallback.motionArtworkTallBgColor)
+        motionArtworkTallTextColor1 = preferredPresentationValue(motionArtworkTallTextColor1, fallback: fallback.motionArtworkTallTextColor1)
+        motionArtworkTallTextColor2 = preferredPresentationValue(motionArtworkTallTextColor2, fallback: fallback.motionArtworkTallTextColor2)
+        motionArtworkTallTextColor3 = preferredPresentationValue(motionArtworkTallTextColor3, fallback: fallback.motionArtworkTallTextColor3)
+        motionArtworkTallTextColor4 = preferredPresentationValue(motionArtworkTallTextColor4, fallback: fallback.motionArtworkTallTextColor4)
     }
 
     var statusText: String {

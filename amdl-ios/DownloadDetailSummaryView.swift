@@ -49,6 +49,8 @@ struct DownloadSongDetailContent: View {
 
 struct DownloadDetailSummaryView: View {
     let job: Job
+    /// 竖版出血头图已经展示了封面与标题，概览这里就不要再画一遍。
+    var hidesArtwork = false
     let items: [JobItem]
     let progress: Double
     var downloadSpeed: Double = 0
@@ -115,45 +117,44 @@ struct DownloadDetailSummaryView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            JobArtworkView(job: job, pixelSize: JobArtworkLoader.heroPixelSize)
-                .aspectRatio(1, contentMode: .fit)
-                // 有动态封面的专辑在静态封面之上淡入一层循环视频；没有的话这一层
-                // 什么都不画。放在 clipShape 之前，圆角同样裁到视频上。
-                .overlay {
-                    MotionArtworkView(job: job)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .shadow(color: .black.opacity(0.12), radius: 16, y: 4)
-                .padding(.horizontal, 32.5)
-                .padding(.bottom, 11.5)
+            if !hidesArtwork {
+                JobArtworkView(job: job, pixelSize: JobArtworkLoader.heroPixelSize)
+                    .aspectRatio(1, contentMode: .fit)
+                    // 有动态封面的专辑在静态封面之上淡入一层循环视频；没有的话这一层
+                    // 什么都不画。放在 clipShape 之前，圆角同样裁到视频上。
+                    .overlay {
+                        MotionArtworkView(job: job)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .shadow(color: .black.opacity(0.12), radius: 16, y: 4)
+                    .padding(.horizontal, 32.5)
+                    .padding(.bottom, 11.5)
+            }
 
             VStack(spacing: 2) {
-                Text(job.displayName)
-                    .font(.title2.bold())
-                    .foregroundStyle(palette?.primaryText ?? Color.primary)
-                    .multilineTextAlignment(.center)
-
-                if let headlineSubtitle {
-                    Text(headlineSubtitle)
-                        .font(.title3)
-                        .foregroundStyle(palette?.secondaryText ?? Self.artistLineColor)
+                // 竖版头图已经把标题和艺人压在画面上了，这里不再重复一遍。
+                if !hidesArtwork {
+                    Text(job.displayName)
+                        .font(.title2.bold())
+                        .foregroundStyle(palette?.primaryText ?? Color.primary)
                         .multilineTextAlignment(.center)
-                        .padding(.top, 1.5)
+
+                    if let headlineSubtitle {
+                        Text(headlineSubtitle)
+                            .font(.title3)
+                            .foregroundStyle(palette?.secondaryText ?? Self.artistLineColor)
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 1.5)
+                    }
                 }
 
-                if !captionSegments.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(captionSegments) { segment in
-                            if segment.id != captionSegments.first?.id {
-                                Text("·")
-                            }
-                            caption(segment)
-                        }
-                    }
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(palette?.tertiaryText ?? Color.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                if !hidesArtwork {
+                    JobCaptionRow(
+                        job: job,
+                        items: items,
+                        color: palette?.tertiaryText ?? Color.secondary,
+                        presentedQualityDetails: $presentedQualityDetails
+                    )
                     .padding(.top, 2.667)
                 }
             }
@@ -275,7 +276,70 @@ enum TrackDurationSummary {
     }
 }
 
-private enum CaptionSegment: Identifiable {
+/// 「流派 · 年份 · 音质 · 区域」那一行。方形概览和竖版出血头图共用，保证两种
+/// 版式下这一行的排版完全一致。
+struct JobCaptionRow: View {
+    let job: Job
+    let items: [JobItem]
+    let color: Color
+    @Binding var presentedQualityDetails: AudioQualityPresentation.Details?
+
+    var segments: [CaptionSegment] {
+        var out: [CaptionSegment] = []
+        if let genre = nonempty(job.genre) {
+            out.append(.text(id: "genre", value: genre))
+        }
+        if let releaseDate = job.releaseDate, releaseDate.count >= 4 {
+            let year = String(releaseDate.prefix(4))
+            if year.allSatisfy(\.isNumber) {
+                out.append(.text(id: "year", value: "\(year)年"))
+            }
+        }
+        if job.type == .song || job.type == .album {
+            out.append(contentsOf: AudioQualityPresentation.badges(for: items).map { .badge($0) })
+        }
+        if let storefront = nonempty(job.storefront) {
+            out.append(.text(id: "storefront", value: storefront.uppercased()))
+        }
+        return out
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(segments) { segment in
+                if segment.id != segments.first?.id {
+                    Text("·")
+                }
+                switch segment {
+                case .text(_, let text):
+                    Text(text)
+                case .badge(let badge):
+                    Button {
+                        presentedQualityDetails = AudioQualityPresentation.details(for: items)
+                    } label: {
+                        QualityBadgeView(badge: badge)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(badge.accessibilityLabel)，查看音质详情")
+                    .accessibilityHint("轻点查看位深度、采样率和码率")
+                }
+            }
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(color)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+    }
+
+    private func nonempty(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+enum CaptionSegment: Identifiable {
     case text(id: String, value: String)
     case badge(AudioQualityPresentation.Badge)
 

@@ -23,7 +23,11 @@ struct DownloadTrackBoundsPreferenceKey: PreferenceKey {
 }
 
 struct DownloadTrackListView: View {
+
     let job: Job?
+    /// 非 nil 时用竖版出血头图取代方形概览封面。
+    var tallHeaderURL: URL? = nil
+    var tallHeaderPalette: DownloadDetailPalette? = nil
     let items: [JobItem]
     let progress: Double
     var downloadSpeed: Double = 0
@@ -70,8 +74,7 @@ struct DownloadTrackListView: View {
         return (luminance >= 0.5 ? Color.white : Color.black).opacity(0.131)
     }
 
-    var body: some View {
-        List {
+    @ViewBuilder private var listContent: some View {
             if let errorMessage {
                 Section {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -81,9 +84,27 @@ struct DownloadTrackListView: View {
             }
 
             if let job {
+                if let tallHeaderURL, let tallHeaderPalette {
+                    Section {
+                        MotionArtworkTallHeader(
+                            job: job,
+                            items: items,
+                            presentedQualityDetails: $presentedQualityDetails,
+                            videoURL: tallHeaderURL,
+                            palette: tallHeaderPalette
+                        )
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets())
+                    }
+                    // 头图和紧随其后的概览是同一段文字节奏，中间不留 section 间距。
+                    .listSectionSpacing(0)
+                }
+
                 Section {
                     DownloadDetailSummaryView(
                         job: job,
+                        hidesArtwork: tallHeaderURL != nil,
                         items: items,
                         progress: progress,
                         downloadSpeed: downloadSpeed,
@@ -116,10 +137,27 @@ struct DownloadTrackListView: View {
             } else if isLoading && !hasLoadedDetail {
                 loadingSection
             }
+    }
+
+    var body: some View {
+        // 竖版出血头图必须四边贴屏。insetGrouped 会给每个 section 留 16pt 左右边距
+        // （实测截图量出 48px @3x），listRowInsets / listSectionMargins / 负 padding
+        // 都改不掉——负 padding 还会被行裁掉。plain 样式没有这层边距，是唯一干净的
+        // 解法，所以竖版走 plain，方形维持原样。
+        Group {
+            if tallHeaderURL == nil {
+                List { listContent }
+            } else {
+                List { listContent }.listStyle(.plain)
+            }
         }
         .contentMargins(.top, 0, for: .scrollContent)
         .listSectionSpacing(10)
         .scrollContentBackground(palette == nil ? .automatic : .hidden)
+        // 竖版出血头图要真正铺到状态栏后面。行内的 ignoresSafeArea 逃不出 List 的
+        // 布局，只能让 List 本身放开顶部——列表随之整体上移并从屏幕顶端开始滚动，
+        // 和 Apple Music 专辑页的行为一致。
+        .ignoresSafeArea(edges: tallHeaderURL == nil ? [] : .top)
         .overlayPreferenceValue(DownloadTrackBoundsPreferenceKey.self) { bounds in
             GeometryReader { proxy in
                 if let first = bounds[.first] {

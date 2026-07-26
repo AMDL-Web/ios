@@ -26,6 +26,25 @@ struct DownloadDetailView: View {
     @State private var lastEventID: Int64 = 0
     @State private var presentedQualityDetails: AudioQualityPresentation.Details?
     @State private var speedTracker = TaskSpeedTracker()
+    @AppStorage(MotionArtworkStyle.storageKey) private var motionStyleRaw = MotionArtworkStyle.square.rawValue
+
+    private var motionStyle: MotionArtworkStyle {
+        MotionArtworkStyle(rawValue: motionStyleRaw) ?? .square
+    }
+
+    /// 竖版出血版式只在该任务确实有 3:4 动态封面时启用；没有就退回方形卡片。
+    private var tallHeaderURL: URL? {
+        guard motionStyle == .tall, let job else { return nil }
+        return job.motionArtworkVideoURL(style: .tall)
+    }
+
+    /// 竖版头图必须有个背景色来做底部渐变。动态配色是首选，但在加配色之前解析的
+    /// 旧任务只有 URL 没有调色板 —— 那种情况退回静态封面那套，总比整个版式静默
+    /// 失效强。
+    private var tallHeaderPalette: DownloadDetailPalette? {
+        guard tallHeaderURL != nil, let job else { return nil }
+        return job.motionArtworkPalette(style: .tall) ?? palette
+    }
 
     private var job: Job? {
         detail?.job ?? initialJob
@@ -53,10 +72,16 @@ struct DownloadDetailView: View {
         return url
     }
 
+    /// 正在展示动态封面时改用它自己那套配色。每个资产的调色板差别很大（静态
+    /// `598090` 配近黑、方形 `5c6786` 配近白、竖版 `05104b` 配浅色），拿静态那套
+    /// 去配动态画面会得到深底深字 —— 这也是它和 Apple Music 观感对不上的原因。
     private var palette: DownloadDetailPalette? {
-        guard let job,
-              job.type.usesArtworkMetadataPalette,
-              let background = job.artworkBackgroundColor else {
+        guard let job, job.type.usesArtworkMetadataPalette else { return nil }
+        if job.motionArtworkVideoURL(style: motionStyle) != nil,
+           let motionPalette = job.motionArtworkPalette(style: motionStyle) {
+            return motionPalette
+        }
+        guard let background = job.artworkBackgroundColor else {
             return nil
         }
         let primary = job.artworkPrimaryTextColor ?? .primary
@@ -90,6 +115,8 @@ struct DownloadDetailView: View {
             } else {
                 DownloadTrackListView(
                     job: job,
+                    tallHeaderURL: tallHeaderURL,
+                    tallHeaderPalette: tallHeaderPalette,
                     items: items,
                     progress: progress,
                     downloadSpeed: speedTracker.downloadBytesPerSecond,

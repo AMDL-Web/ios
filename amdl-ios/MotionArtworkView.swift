@@ -18,6 +18,22 @@ import UIKit
 /// 下面的 [JobArtworkView] 原样露出。
 struct MotionArtworkView: View {
     let job: Job
+    /// 只有方形模式才在静态封面上叠这一层；竖版模式走 [MotionArtworkTallHeader]。
+    var style: MotionArtworkStyle = .square
+
+    var body: some View {
+        if style == .square, let url = job.motionArtworkVideoURL(style: .square) {
+            MotionArtworkPlayer(url: url)
+        }
+    }
+}
+
+/// 循环播放一段动态封面 HLS。方形覆盖层和竖版出血头图共用这一个 —— 静音、
+/// 从不激活 AVAudioSession、遵守减弱动态效果 / 低电量 / 后台暂停。
+struct MotionArtworkPlayer: View {
+    let url: URL
+    /// 首帧上屏前保持透明，避免黑底闪一下。方形模式下由调用方决定要不要淡入。
+    var fadesIn: Bool = true
 
     @State private var isRendering = false
     @State private var isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -25,36 +41,20 @@ struct MotionArtworkView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
-    /// 后端是解析之后异步回填的，所以同一个任务可能先是 nil、过一会儿才有值。
-    private var videoURL: URL? {
-        guard let raw = job.motionArtworkURL, !raw.isEmpty else { return nil }
-        return URL(string: raw)
-    }
-
-    /// 「减弱动态效果」是无障碍设置，低电量模式是用户的续航诉求，两者都应当让
-    /// 封面老实待着不动。切到后台时也停，省得白白解码。
     private var shouldPlay: Bool {
         !reduceMotion && !isLowPowerMode && scenePhase == .active
     }
 
     var body: some View {
-        Group {
-            if let videoURL {
-                MotionArtworkPlayerLayer(
-                    url: videoURL,
-                    isPlaying: shouldPlay,
-                    onRenderingChange: { isRendering = $0 }
-                )
-                // 首帧真正上屏前保持透明，避免静态封面被一块黑底闪一下盖住。
-                .opacity(isRendering ? 1 : 0)
-                .animation(.easeInOut(duration: 0.45), value: isRendering)
-                .allowsHitTesting(false)
-            }
-        }
-        .onChange(of: videoURL) { _, _ in
-            // 视图身份被导航复用去展示另一个任务时，旧封面的淡入状态不能留着。
-            isRendering = false
-        }
+        MotionArtworkPlayerLayer(
+            url: url,
+            isPlaying: shouldPlay,
+            onRenderingChange: { isRendering = $0 }
+        )
+        .opacity(fadesIn && !isRendering ? 0 : 1)
+        .animation(.easeInOut(duration: 0.45), value: isRendering)
+        .allowsHitTesting(false)
+        .onChange(of: url) { _, _ in isRendering = false }
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
             isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
         }

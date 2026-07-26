@@ -89,6 +89,10 @@ struct RadioView: View {
                 }
             }
 
+            Section("外观") {
+                MotionArtworkStylePicker()
+            }
+
             Section("下载") {
                 SettingsRow(
                     title: "下载行为",
