@@ -4,6 +4,7 @@
 //
 
 import AVFoundation
+import CoreImage
 import Combine
 import SwiftUI
 import UIKit
@@ -61,14 +62,38 @@ struct MotionArtworkPlayer: View {
     }
 }
 
-/// 承载 `AVPlayerLayer` 的 UIView —— 用 `layerClass` 而不是自己加一层 sublayer，
-/// 这样图层尺寸由 Auto Layout 直接驱动，不需要在 `layoutSubviews` 里手动同步 frame。
+/// 视频呈现层。**刻意不用 `AVPlayerLayer`**：它的内容既不参与 Liquid Glass 的
+/// 背景采样（玻璃盖上去会是空的），也不进系统快照（上滑到多任务视图时封面会变成
+/// 一块纯背景）。改成把解码帧的 IOSurface 直接塞进普通 CALayer 的 contents，两个
+/// 问题一起消失，而且暂停时最后一帧天然留在层上，等于免费的冻结帧。
 private final class MotionArtworkPlayerView: UIView {
-    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    let videoLayer: CALayer = {
+        let layer = CALayer()
+        // resizeAspect 而不是 AspectFill：容器比例只要和视频差一点，Fill 就会裁掉
+        // 边缘、看起来像被放大。竖版容器本来就是 3:4，用 Aspect 不会有黑边，却能
+        // 保证画面范围和 Apple 一致。
+        layer.contentsGravity = .resizeAspect
+        layer.masksToBounds = true
+        return layer
+    }()
 
-    var playerLayer: AVPlayerLayer {
-        // layerClass 已经声明为 AVPlayerLayer，这里必然成立。
-        layer as! AVPlayerLayer
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        layer.addSublayer(videoLayer)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // 尺寸变化由布局驱动，不要走隐式动画，否则拉伸头图会拖影。
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        videoLayer.frame = bounds
+        CATransaction.commit()
     }
 }
 
@@ -84,8 +109,7 @@ private struct MotionArtworkPlayerLayer: UIViewRepresentable {
     func makeUIView(context: Context) -> MotionArtworkPlayerView {
         let view = MotionArtworkPlayerView()
         view.backgroundColor = .clear
-        view.playerLayer.videoGravity = .resizeAspectFill
-        view.playerLayer.player = context.coordinator.player
+        context.coordinator.view = view
         context.coordinator.load(url)
         context.coordinator.setPlaying(isPlaying)
         return view
@@ -105,10 +129,17 @@ private struct MotionArtworkPlayerLayer: UIViewRepresentable {
     final class Coordinator {
         let player: AVQueuePlayer
         var onRenderingChange: (Bool) -> Void
+        weak var view: MotionArtworkPlayerView?
 
         private var looper: AVPlayerLooper?
-        private var observation: NSKeyValueObservation?
-        private var loadedURL: URL?
+        private var itemObservation: NSKeyValueObservation?
+        private var videoOutput: AVPlayerItemVideoOutput?
+        private var displayLink: CADisplayLink?
+        private var hasDeliveredFrame = false
+        /// 必须强引用当前这帧。IOSurface 只是 pixel buffer 的一个视图，buffer 一
+        /// 释放就会被输出的回收池收回复用，layer.contents 随即塌成空白——上滑到多
+        /// 任务视图时封面"渐隐成纯色"就是这么来的。留住它，冻结帧才立得住。
+        private var displayedBuffer: CVPixelBuffer?
 
         init(onRenderingChange: @escaping (Bool) -> Void) {
             self.onRenderingChange = onRenderingChange
@@ -119,36 +150,89 @@ private struct MotionArtworkPlayerLayer: UIViewRepresentable {
             player.preventsDisplaySleepDuringVideoPlayback = false
         }
 
+        private var loadedURL: URL?
+
         func load(_ url: URL) {
             guard loadedURL != url else { return }
             loadedURL = url
+            hasDeliveredFrame = false
             report(false)
 
-            observation?.invalidate()
+            itemObservation?.invalidate()
             looper?.disableLooping()
             // AVPlayerLooper 负责无缝循环：它按模板不断续排队列项，比监听
             // AVPlayerItemDidPlayToEndTime 再 seek(.zero) 少一次可见的卡顿。
             looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
 
-            observation = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
-                let isPlaying = player.timeControlStatus == .playing
+            // 循环器会不断换 currentItem，视频输出必须跟着挂到新的那个上。
+            itemObservation = player.observe(\.currentItem, options: [.initial, .new]) { [weak self] player, _ in
+                let item = player.currentItem
                 Task { @MainActor [weak self] in
-                    self?.report(isPlaying)
+                    self?.attachVideoOutput(to: item)
                 }
             }
+        }
+
+        private func attachVideoOutput(to item: AVPlayerItem?) {
+            guard let item else { return }
+            // IOSurface 属性是关键：拿到的 pixel buffer 才能直接当 layer.contents，
+            // 省掉每帧一次 CIImage→CGImage 的软件转换。
+            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as CFDictionary,
+            ])
+            item.add(output)
+            videoOutput = output
         }
 
         func setPlaying(_ isPlaying: Bool) {
             if isPlaying {
                 player.play()
+                startDisplayLink()
             } else {
+                // 停掉取帧即可：最后一帧留在 layer.contents 上，就是冻结帧。
+                stopDisplayLink()
                 player.pause()
             }
         }
 
+        private func startDisplayLink() {
+            guard displayLink == nil else { return }
+            let link = CADisplayLink(target: self, selector: #selector(pullFrame(_:)))
+            // 视频是 24fps，没必要按屏幕刷新率满速取帧。
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 24)
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+
+        private func stopDisplayLink() {
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+
+        @objc private func pullFrame(_ link: CADisplayLink) {
+            guard let output = videoOutput, let view else { return }
+            let time = output.itemTime(forHostTime: link.targetTimestamp)
+            guard output.hasNewPixelBuffer(forItemTime: time),
+                  let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil),
+                  let surface = CVPixelBufferGetIOSurface(buffer) else { return }
+            displayedBuffer = buffer
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            view.videoLayer.contents = surface.takeUnretainedValue()
+            CATransaction.commit()
+            if !hasDeliveredFrame {
+                hasDeliveredFrame = true
+                report(true)
+            }
+        }
+
         func tearDown() {
-            observation?.invalidate()
-            observation = nil
+            stopDisplayLink()
+            itemObservation?.invalidate()
+            itemObservation = nil
+            videoOutput = nil
+            displayedBuffer = nil
             looper?.disableLooping()
             looper = nil
             player.removeAllItems()

@@ -21,9 +21,21 @@ struct MotionArtworkTallHeader: View {
     private static let aspectRatio: CGFloat = 3.0 / 4.0
 
     var body: some View {
+        // 下拉时上边缘钉住、画面顺势放大，而不是整块跟着往下滑——列表头图的常规
+        // 做法：量出自身在全局坐标里的 minY，正值就是被下拉的距离。
+        GeometryReader { proxy in
+            let pulled = max(0, proxy.frame(in: .global).minY)
+            content(extraHeight: pulled)
+                .frame(width: proxy.size.width, height: proxy.size.height + pulled)
+                .offset(y: -pulled)
+        }
+        .aspectRatio(Self.aspectRatio, contentMode: .fit)
+    }
+
+    private func content(extraHeight: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             MotionArtworkPlayer(url: videoURL)
-                .aspectRatio(Self.aspectRatio, contentMode: .fill)
+                .scaledToFill()
 
             // 画面下缘压着文字，需要一层由背景色渐变上来的遮罩才读得清；同时它也
             // 负责把视频底边接进下方列表的背景，避免一条硬边。
@@ -47,12 +59,14 @@ struct MotionArtworkTallHeader: View {
                     .font(.title2.bold())
                     .foregroundStyle(palette.primaryText)
                     .multilineTextAlignment(.center)
+                    .shadow(color: .black.opacity(0.35), radius: 8, y: 1)
 
                 if let subtitle = job.artistName, !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.title3)
                         .foregroundStyle(palette.secondaryText)
                         .multilineTextAlignment(.center)
+                        .shadow(color: .black.opacity(0.35), radius: 8, y: 1)
                         .padding(.top, 1.5)
                 }
 
@@ -71,9 +85,6 @@ struct MotionArtworkTallHeader: View {
             .padding(.horizontal, 24)
             // 量参考图得到：Apple 的元信息行底部距画面底 48.3pt。
             .padding(.bottom, 45.7)
-            // 文字压在动态画面上，深浅随视频每一帧变化；加一层柔阴影保证任何一帧
-            // 下都读得清，比整块压暗遮罩更少损失画面。
-            .shadow(color: .black.opacity(0.35), radius: 8, y: 1)
         }
 
     }
