@@ -75,6 +75,10 @@ struct Job: Codable, Identifiable {
     var updatedAt: Date
     /// 后端解析 input 后回填的展示元数据；旧后端或未解析完成时为 nil。
     var artistName: String? = nil
+    /// 该艺人在 music.apple.com 上的主页，后端解析时从 Apple 的 artist 资源一并
+    /// 取回。只有单曲/专辑/艺人任务有；歌单和电台那行是策展人不是艺人，没有。
+    /// 这个字段出现之前解析过的任务也是空的 —— 见 AppleMusicLinks 的退路。
+    var artistURL: String? = nil
     var curatorName: String? = nil
     /// YYYY-MM-DD。
     var releaseDate: String? = nil
@@ -116,6 +120,7 @@ struct Job: Codable, Identifiable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case artistName = "artist_name"
+        case artistURL = "artist_url"
         case curatorName = "curator_name"
         case releaseDate = "release_date"
         case artworkBgColor = "artwork_bg_color"
@@ -169,6 +174,7 @@ struct Job: Codable, Identifiable {
         title = preferredPresentationValue(title, fallback: fallback.title)
         artworkURL = preferredPresentationValue(artworkURL, fallback: fallback.artworkURL)
         artistName = preferredPresentationValue(artistName, fallback: fallback.artistName)
+        artistURL = preferredPresentationValue(artistURL, fallback: fallback.artistURL)
         curatorName = preferredPresentationValue(curatorName, fallback: fallback.curatorName)
         releaseDate = preferredPresentationValue(releaseDate, fallback: fallback.releaseDate)
         genre = preferredPresentationValue(genre, fallback: fallback.genre)
@@ -909,10 +915,16 @@ enum DownloadsAPIError: LocalizedError {
 
 enum DownloadsAPI {
     private static let baseURLKey = "backendBaseURL"
-    /// 公开部署的测试后端。它在网关（oauth2-proxy）后面，所有 /api 请求都需要
-    /// 「通过 Apple 登录」拿到的 Bearer 令牌，见 `AppleAuth.swift`。
+    /// 生产部署的门户地址（`amdl-portal`）。
+    ///
+    /// 旧值是 `backend-dev-amdl.lyjw131.com`，那是 oauth2-proxy 直接挡在
+    /// `amdl-backend` 前面的那条链路。现在中间站着门户：它是 OIDC RP，管会话、任务
+    /// 归属和配额，`/api/v1/*` 是它对后端的镜像（形状逐字节兼容，所以下面那些
+    /// Codable 结构一个都不用改），`/api/gw/*` 是它自己的接口。
+    ///
+    /// 所有 /api 请求都要带门户签发的 Bearer 令牌，见 `PortalAuth.swift`。
     /// 仍然可以在「配置 → 调试」里改成别的地址。
-    static let defaultBaseURLString = "https://backend-dev-amdl.lyjw131.com"
+    static let defaultBaseURLString = "https://amdl.lyjw131.com"
     static let appGroupIdentifier = "group.com.lyjw131.amdl.amdl-ios"
     private static let sharedDefaults = UserDefaults(suiteName: appGroupIdentifier)
 
@@ -975,7 +987,7 @@ enum DownloadsAPI {
         mediaUserToken: String?
     ) async throws -> DownloadSubmitResponse {
         let url = try makeURL(path: "/api/v1/downloads")
-        var request = URLRequest(authorizedURL: url)
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(
@@ -986,19 +998,17 @@ enum DownloadsAPI {
             )
         )
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw DownloadsAPIError.invalidResponse
-        }
+        let (data, httpResponse) = try await PortalHTTP.send(request)
+        // 202 和 422 都要解 body：**422 才是配额被拒时唯一带着逐条原因的响应**。
+        // 门户把每个 URL 的拒绝理由塞在 `results[].status/error` 里，整批被拒时
+        // 它必须答 422 而不是 4xx 里的别的码——因为这里只对这两个码解码，别的码
+        // 会把逐条理由整个丢掉，只剩一句干巴巴的错误。改这一行前先读
+        // amdl-portal DESIGN.md §13.19。
         if httpResponse.statusCode == 202 || httpResponse.statusCode == 422,
            let result = try? decoder.decode(DownloadSubmitResponse.self, from: data) {
             return result
         }
-        let backendError = try? decoder.decode(ErrorResponse.self, from: data)
-        throw DownloadsAPIError.server(
-            status: httpResponse.statusCode,
-            message: backendError?.message ?? backendError?.error
-        )
+        throw serverError(status: httpResponse.statusCode, data: data)
     }
 
     static func decodeDownloadDetail(from data: Data) throws -> DownloadDetail {
@@ -1075,23 +1085,29 @@ enum DownloadsAPI {
         return url
     }
 
+    /// 通过 `PortalHTTP` 而不是 `URLSession.shared` 直接发：那一层负责在发之前续
+    /// 快过期的 access token，并在 401 之后刷新一次、重试一次。它还会把 403 的
+    /// `pending_approval` / `suspended` 翻成人话抛出来。
     private static func fetchData(from url: URL) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(for: URLRequest(authorizedURL: url))
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw DownloadsAPIError.invalidResponse
-        }
+        let (data, httpResponse) = try await PortalHTTP.send(URLRequest(url: url))
 
         guard httpResponse.statusCode == 200 else {
-            let message = try? decoder.decode(ErrorResponse.self, from: data).message
-            throw DownloadsAPIError.server(status: httpResponse.statusCode, message: message)
+            throw serverError(status: httpResponse.statusCode, data: data)
         }
 
         return data
     }
-}
 
-private struct ErrorResponse: Codable {
-    let error: String
-    let message: String?
+    /// 把镜像面的错误体翻成一个能给用户看的错误。
+    ///
+    /// `/api/v1/*` 的错误保持 amdl-backend 的 `{"error":...}` 形状，所以
+    /// `pending_approval` 是从 `error` 字段里读出来的，不是 problem+json 的 `code`。
+    /// 两边的值域是同一张表（DESIGN.md §6.3），一个客户端只需要一份码表。
+    static func serverError(status: Int, data: Data) -> Error {
+        let body = PortalErrorBody.decode(from: data)
+        if let mapped = body?.authError(status: status) {
+            return mapped
+        }
+        return DownloadsAPIError.server(status: status, message: body?.resolvedMessage)
+    }
 }

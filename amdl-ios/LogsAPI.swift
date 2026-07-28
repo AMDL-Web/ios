@@ -219,16 +219,15 @@ enum LogsAPI {
             items.append(URLQueryItem(name: "after", value: String(after)))
         }
         let url = try makeURL(path: "/api/v1/logs", queryItems: items)
-        var request = URLRequest(authorizedURL: url)
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw DownloadsAPIError.invalidResponse
-        }
+        // 门户策略表把 /api/v1/logs 标成 admin only（它带着每个租户的输入 URL），
+        // 所以普通用户在这里拿到 403 forbidden 是设计如此。
+        let (data, httpResponse) = try await PortalHTTP.send(request)
         guard httpResponse.statusCode == 200 else {
-            throw DownloadsAPIError.server(status: httpResponse.statusCode, message: errorMessage(from: data))
+            throw DownloadsAPI.serverError(status: httpResponse.statusCode, data: data)
         }
         return try JSONDecoder().decode(LogPage.self, from: data)
     }
@@ -241,7 +240,7 @@ enum LogsAPI {
         onEntry: (LogEntry) -> Void
     ) async throws {
         let url = try webSocketURL(filter: filter, after: after)
-        let socket = URLSession.shared.authorizedWebSocketTask(with: url)
+        let socket = await URLSession.shared.authorizedWebSocketTask(with: url)
         socket.resume()
 
         let decoder = JSONDecoder()

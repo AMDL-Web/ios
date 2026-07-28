@@ -1,23 +1,27 @@
 import UIKit
 import UniformTypeIdentifiers
 
+/// 分享面板只干一件事：把链接提交给后端，然后给两个出口——去主 App 看，或者关掉。
+///
+/// 这里刻意不显示任务详情（封面 / 音轨数 / 进度）。分享面板是个一闪而过的浮层，
+/// 轮询进度既要一直占着扩展进程，看到的也不如主 App 和实时活动全。
 final class ShareViewController: UIViewController {
     /// 同主 App：不内置具体地址。用户没在主 App 里填过后端地址时，分享扩展会
     /// 走下面的 `guard` 分支提示去配置，而不是打到一个写死的地址上。
     /// 与 `DownloadsAPI.defaultBaseURLString` 保持一致；主 App 改过地址时，
     /// App Group 里存的值优先。
-    private static let defaultBackendBaseURL = "https://backend-dev-amdl.lyjw131.com"
+    private static let defaultBackendBaseURL = "https://amdl.lyjw131.com"
     private static let backendBaseURLKey = "backendBaseURL"
     private static let appGroupIdentifier = "group.com.lyjw131.amdl.amdl-ios"
+    /// 主 App 的 URL scheme，见 `amdl-ios/Info.plist` 的 CFBundleURLTypes 和
+    /// `ContentView.handleOpenURL`：带 job id 直接落到任务详情，不带就停在下载页。
+    private static let appURLScheme = "amdl"
 
-    private let artworkView = UIImageView()
+    private let iconView = UIImageView()
     private let statusLabel = UILabel()
-    private let titleLabel = UILabel()
-    private let metadataLabel = UILabel()
-    private let progressView = UIProgressView(progressViewStyle: .default)
-    private let progressLabel = UILabel()
-    private let detailLabel = UILabel()
-    private let actionButton = UIButton(type: .system)
+    private let messageLabel = UILabel()
+    private let openAppButton = UIButton(type: .system)
+    private let closeButton = UIButton(type: .system)
 
     private nonisolated let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -27,10 +31,8 @@ final class ShareViewController: UIViewController {
         return URLSession(configuration: configuration)
     }()
 
-    private var sharedURL: URL?
     private var submissionTask: Task<Void, Never>?
-    private var artworkTask: Task<Void, Never>?
-    private var displayedArtworkURL: URL?
+    private var createdJobID: String?
     private var hasStarted = false
 
     override func viewDidLoad() {
@@ -42,89 +44,63 @@ final class ShareViewController: UIViewController {
         super.viewDidAppear(animated)
         guard !hasStarted else { return }
         hasStarted = true
-        startSubmission()
+        submissionTask = Task { [weak self] in
+            await self?.submitSharedURL()
+        }
     }
 
     deinit {
         submissionTask?.cancel()
-        artworkTask?.cancel()
         session.invalidateAndCancel()
     }
 
     private func configureView() {
         view.backgroundColor = .systemBackground
-        preferredContentSize = CGSize(width: 380, height: 480)
+        preferredContentSize = CGSize(width: 340, height: 300)
 
-        artworkView.image = UIImage(systemName: "arrow.down.circle.fill")
-        artworkView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 44)
-        artworkView.tintColor = .systemBlue
-        artworkView.backgroundColor = .secondarySystemBackground
-        artworkView.contentMode = .center
-        artworkView.clipsToBounds = true
-        artworkView.layer.cornerRadius = 16
-
-        let artworkContainer = UIView()
-        artworkView.translatesAutoresizingMaskIntoConstraints = false
-        artworkContainer.addSubview(artworkView)
+        iconView.image = UIImage(systemName: "arrow.down.circle.fill")
+        iconView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 48)
+        iconView.tintColor = .systemBlue
+        iconView.contentMode = .center
 
         statusLabel.text = "正在创建下载任务"
-        statusLabel.font = .preferredFont(forTextStyle: .headline)
+        statusLabel.font = .preferredFont(forTextStyle: .title3)
+        statusLabel.adjustsFontForContentSizeCategory = true
         statusLabel.textAlignment = .center
+        statusLabel.numberOfLines = 2
 
-        titleLabel.text = "Apple Music 下载"
-        titleLabel.font = .preferredFont(forTextStyle: .title2)
-        titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.textAlignment = .center
-        titleLabel.numberOfLines = 2
+        messageLabel.text = "正在读取分享的链接"
+        messageLabel.font = .preferredFont(forTextStyle: .subheadline)
+        messageLabel.adjustsFontForContentSizeCategory = true
+        messageLabel.textColor = .secondaryLabel
+        messageLabel.textAlignment = .center
+        messageLabel.numberOfLines = 4
 
-        metadataLabel.text = "正在读取任务信息"
-        metadataLabel.font = .preferredFont(forTextStyle: .subheadline)
-        metadataLabel.textColor = .secondaryLabel
-        metadataLabel.textAlignment = .center
+        var openConfiguration = UIButton.Configuration.borderedProminent()
+        openConfiguration.title = "打开 App"
+        openConfiguration.image = UIImage(systemName: "arrow.up.forward.app.fill")
+        openConfiguration.imagePadding = 6
+        openAppButton.configuration = openConfiguration
+        openAppButton.addTarget(self, action: #selector(openApp), for: .touchUpInside)
 
-        progressView.progress = 0
-        progressView.tintColor = .systemBlue
-
-        progressLabel.text = "准备中"
-        progressLabel.font = .preferredFont(forTextStyle: .footnote)
-        progressLabel.textColor = .secondaryLabel
-        progressLabel.textAlignment = .right
-        progressLabel.setContentHuggingPriority(.required, for: .horizontal)
-
-        detailLabel.text = "正在读取 Apple Music 链接..."
-        detailLabel.font = .preferredFont(forTextStyle: .footnote)
-        detailLabel.textColor = .secondaryLabel
-        detailLabel.textAlignment = .center
-        detailLabel.numberOfLines = 3
-
-        actionButton.configuration = .borderedProminent()
-        actionButton.configuration?.title = "完成"
-        actionButton.configuration?.image = UIImage(systemName: "checkmark")
-        actionButton.configuration?.imagePadding = 6
-        actionButton.addTarget(self, action: #selector(performPrimaryAction), for: .touchUpInside)
-        actionButton.isHidden = true
-
-        let progressRow = UIStackView(arrangedSubviews: [progressView, progressLabel])
-        progressRow.axis = .horizontal
-        progressRow.alignment = .center
-        progressRow.spacing = 12
+        var closeConfiguration = UIButton.Configuration.gray()
+        closeConfiguration.title = "关闭"
+        closeButton.configuration = closeConfiguration
+        closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
 
         let stack = UIStackView(arrangedSubviews: [
-            artworkContainer,
+            iconView,
             statusLabel,
-            titleLabel,
-            metadataLabel,
-            progressRow,
-            detailLabel,
-            actionButton
+            messageLabel,
+            openAppButton,
+            closeButton
         ])
         stack.axis = .vertical
         stack.alignment = .fill
         stack.spacing = 12
-        stack.setCustomSpacing(18, after: artworkContainer)
+        stack.setCustomSpacing(18, after: iconView)
         stack.setCustomSpacing(6, after: statusLabel)
-        stack.setCustomSpacing(18, after: metadataLabel)
-        stack.setCustomSpacing(20, after: detailLabel)
+        stack.setCustomSpacing(24, after: messageLabel)
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
 
@@ -133,54 +109,91 @@ final class ShareViewController: UIViewController {
             stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -28),
-            artworkContainer.heightAnchor.constraint(equalToConstant: 104),
-            artworkView.widthAnchor.constraint(equalToConstant: 104),
-            artworkView.heightAnchor.constraint(equalToConstant: 104),
-            artworkView.centerXAnchor.constraint(equalTo: artworkContainer.centerXAnchor),
-            artworkView.centerYAnchor.constraint(equalTo: artworkContainer.centerYAnchor),
-            actionButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 48)
+            iconView.heightAnchor.constraint(equalToConstant: 56),
+            openAppButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
+            closeButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 48)
         ])
     }
 
-    private func startSubmission() {
-        submissionTask?.cancel()
-        submissionTask = Task { [weak self] in
-            await self?.loadSubmitAndPoll()
+    // MARK: - 两个出口
+
+    @objc private func openApp() {
+        // 提交还在路上时先等它跑完，否则扩展进程被换掉，任务就白建了。按钮上转个
+        // 圈，用户知道点到了。
+        openAppButton.configuration?.showsActivityIndicator = true
+        Task { [weak self] in
+            await self?.submissionTask?.value
+            self?.openHostApp()
         }
     }
 
-    @objc private func performPrimaryAction() {
-        if actionButton.configuration?.title == "重试" {
-            showSubmittingState()
-            startSubmission()
-            return
-        }
-
+    @objc private func close() {
         submissionTask?.cancel()
-        artworkTask?.cancel()
         extensionContext?.completeRequest(returningItems: nil)
     }
 
-    private func loadSubmitAndPoll() async {
-        do {
-            let url: URL
-            if let sharedURL {
-                url = sharedURL
-            } else {
-                url = try await extractSharedURL()
+    /// 扩展里没有 `UIApplication`（`UIApplication.shared` 在扩展 target 里就是不可用
+    /// API），但场景上的 `open(_:options:completionHandler:)` 是公开且没被废弃的，
+    /// 扩展照样能调，这是唯一干净的跳转方式。
+    ///
+    /// `NSExtensionContext.open` 留作兜底：文档上它只承诺给 Today 扩展用，实测在
+    /// 分享扩展里回调直接给 false，什么也不会发生。
+    private func openHostApp() {
+        guard let url = hostAppURL() else {
+            close()
+            return
+        }
+
+        guard let scene = view.window?.windowScene else {
+            openViaExtensionContext(url)
+            return
+        }
+        scene.open(url, options: nil) { opened in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if opened {
+                    self.extensionContext?.completeRequest(returningItems: nil)
+                } else {
+                    self.openViaExtensionContext(url)
+                }
             }
+        }
+    }
+
+    private func openViaExtensionContext(_ url: URL) {
+        extensionContext?.open(url) { _ in
+            Task { @MainActor [weak self] in
+                self?.extensionContext?.completeRequest(returningItems: nil)
+            }
+        }
+    }
+
+    /// 带上 job id 就直接落到那个任务的详情页，没有就停在下载列表。
+    private func hostAppURL() -> URL? {
+        var components = URLComponents()
+        components.scheme = Self.appURLScheme
+        components.host = "download"
+        if let createdJobID, !createdJobID.isEmpty {
+            components.path = "/\(createdJobID)"
+        }
+        return components.url
+    }
+
+    // MARK: - 提交
+
+    private func submitSharedURL() async {
+        do {
+            let url = try await extractSharedURL()
             try Task.checkCancellation()
-            sharedURL = url
-            detailLabel.text = url.absoluteString
+            messageLabel.text = url.absoluteString
 
             let response = try await submit(url: url)
             try Task.checkCancellation()
             guard let jobID = response.jobID else {
                 throw ShareSubmissionError.rejected(message: response.firstError)
             }
-
-            showCreatedState(job: response.job)
-            await poll(jobID: jobID)
+            createdJobID = jobID
+            showCreatedState()
         } catch is CancellationError {
             return
         } catch {
@@ -188,30 +201,20 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    private func poll(jobID: String) async {
-        var refreshFailures = 0
+    private func showCreatedState() {
+        iconView.image = UIImage(systemName: "checkmark.circle.fill")
+        iconView.tintColor = .systemGreen
+        statusLabel.text = "任务已创建"
+        statusLabel.textColor = .label
+        messageLabel.text = "进度在 App 和实时活动里看"
+    }
 
-        while !Task.isCancelled {
-            do {
-                let detail = try await fetchDetail(jobID: jobID)
-                try Task.checkCancellation()
-                refreshFailures = 0
-                update(with: detail)
-
-                if !detail.job.status.isActive {
-                    return
-                }
-            } catch is CancellationError {
-                return
-            } catch {
-                refreshFailures += 1
-                detailLabel.text = refreshFailures == 1
-                    ? "暂时无法刷新进度，正在重试..."
-                    : "进度刷新失败，仍会继续重试"
-            }
-
-            try? await Task.sleep(for: .seconds(refreshFailures == 0 ? 1 : min(refreshFailures, 5)))
-        }
+    private func showFailureState(message: String) {
+        iconView.image = UIImage(systemName: "exclamationmark.circle.fill")
+        iconView.tintColor = .systemRed
+        statusLabel.text = "创建失败"
+        statusLabel.textColor = .systemRed
+        messageLabel.text = message
     }
 
     private static func userFacingMessage(for error: Error) -> String {
@@ -245,21 +248,44 @@ final class ShareViewController: UIViewController {
         throw ShareSubmissionError.missingURL
     }
 
-    /// 主 App 里「通过 Apple 登录」拿到的 identity token，网关拿它做认证。
-    /// 扩展和主 App 没有共享源码目录，所以和后端地址一样直接读 App Group——
-    /// 键名与 `AppleAuthCredentialStore` 保持一致。令牌过期时返回 nil，请求会
-    /// 收到 401，用户需要回主 App 重新登录。
-    private static func appleBearerToken() -> String? {
-        guard let defaults = UserDefaults(suiteName: appGroupIdentifier),
-              let token = defaults.string(forKey: "appleIdentityToken"), !token.isEmpty,
-              let expiresAt = defaults.object(forKey: "appleIdentityTokenExpiresAt") as? Double,
-              Date(timeIntervalSince1970: expiresAt).timeIntervalSinceNow > 30
+    /// 主 App 换来的门户 access token，门户拿它做认证。
+    ///
+    /// 从 App Group 的 UserDefaults 搬到了 **Keychain**：以前存的是 Apple 的
+    /// identity token，10 分钟就废，明文放着风险有限；现在存的是门户会话，
+    /// refresh token 有 60 天寿命，不该躺在会进备份的明文 plist 里。
+    ///
+    /// 扩展和主 App 没有共享源码目录，所以这里是 `PortalCredentialStore` 的一份
+    /// 手抄，**四个常量必须和它逐字一致**（service / account / access group）。
+    /// access group 用的是 App Group id——iOS 允许这么用，所以扩展读得到，而且
+    /// 不需要新增任何 entitlement。
+    ///
+    /// 扩展**不做刷新**：它是个一闪而过的浮层，转 token 是主 App 的事。access
+    /// token 过期时这里返回它、请求拿到 401，用户回主 App 打开一次就好了。
+    private static func portalBearerToken() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.lyjw131.amdl.portal",
+            kSecAttrAccount as String: "session",
+            kSecAttrAccessGroup as String: appGroupIdentifier,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data,
+              let stored = try? JSONDecoder().decode(StoredCredentials.self, from: data),
+              !stored.accessToken.isEmpty
         else { return nil }
-        return token
+        return stored.accessToken
+    }
+
+    /// `PortalCredentials` 的解码镜像。字段名必须一致。
+    private struct StoredCredentials: Decodable {
+        let accessToken: String
     }
 
     private static func authorized(_ request: inout URLRequest) {
-        guard let token = appleBearerToken() else { return }
+        guard let token = portalBearerToken() else { return }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
@@ -290,152 +316,25 @@ final class ShareViewController: UIViewController {
             return result
         }
         guard (200..<300).contains(response.statusCode) else {
-            let message = (try? JSONDecoder().decode(BackendError.self, from: data))?.displayMessage
-            throw ShareSubmissionError.server(status: response.statusCode, message: message)
+            let body = try? JSONDecoder().decode(BackendError.self, from: data)
+            // 「等待批准」是每个新用户第一次分享链接时会撞上的状态，泛泛的
+            // 「后端请求失败 (403)」对他们毫无意义。扩展里没有登录入口，所以
+            // 这句话得自己把用户指回主 App。
+            switch body?.machineCode {
+            case "pending_approval":
+                throw ShareSubmissionError.notReady("账号正在等待管理员批准，批准后就能提交下载了。")
+            case "suspended":
+                throw ShareSubmissionError.notReady("这个账号已被停用，请联系管理员。")
+            case "unauthenticated":
+                throw ShareSubmissionError.notReady("登录已过期，请打开一次主 App 重新登录。")
+            default:
+                throw ShareSubmissionError.server(status: response.statusCode, message: body?.displayMessage)
+            }
         }
         guard let result = try? JSONDecoder().decode(ShareDownloadSubmitResponse.self, from: data) else {
             throw ShareSubmissionError.invalidResponse
         }
         return result
-    }
-
-    private func fetchDetail(jobID: String) async throws -> ShareDownloadDetail {
-        let encodedID = jobID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? jobID
-        let url = try backendBaseURL().appending(path: "/api/v1/downloads/\(encodedID)")
-        var request = URLRequest(url: url)
-        Self.authorized(&request)
-        let (data, response) = try await session.data(for: request)
-        guard let response = response as? HTTPURLResponse else {
-            throw ShareSubmissionError.invalidResponse
-        }
-        guard (200..<300).contains(response.statusCode) else {
-            let message = (try? JSONDecoder().decode(BackendError.self, from: data))?.displayMessage
-            throw ShareSubmissionError.server(status: response.statusCode, message: message)
-        }
-        guard let detail = try? JSONDecoder().decode(ShareDownloadDetail.self, from: data) else {
-            throw ShareSubmissionError.invalidResponse
-        }
-        return detail
-    }
-
-    private func showSubmittingState() {
-        artworkTask?.cancel()
-        displayedArtworkURL = nil
-        artworkView.image = UIImage(systemName: "arrow.down.circle.fill")
-        artworkView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 44)
-        artworkView.tintColor = .systemBlue
-        artworkView.backgroundColor = .secondarySystemBackground
-        artworkView.contentMode = .center
-        statusLabel.text = "正在创建下载任务"
-        statusLabel.textColor = .label
-        titleLabel.text = "Apple Music 下载"
-        metadataLabel.text = "正在读取任务信息"
-        progressView.progress = 0
-        progressView.tintColor = .systemBlue
-        progressLabel.text = "准备中"
-        detailLabel.text = sharedURL?.absoluteString ?? "正在读取 Apple Music 链接..."
-        actionButton.configuration?.title = "完成"
-        actionButton.configuration?.image = UIImage(systemName: "checkmark")
-        actionButton.isHidden = true
-    }
-
-    private func showCreatedState(job: ShareJob?) {
-        statusLabel.text = "任务已创建"
-        statusLabel.textColor = .systemGreen
-        actionButton.configuration?.title = "完成"
-        actionButton.configuration?.image = UIImage(systemName: "checkmark")
-        actionButton.isHidden = false
-
-        if let job {
-            update(job: job, items: [])
-        } else {
-            titleLabel.text = "正在解析任务信息"
-            metadataLabel.text = "音轨数解析中"
-            progressLabel.text = "排队中"
-        }
-    }
-
-    private func update(with detail: ShareDownloadDetail) {
-        update(job: detail.job, items: detail.items)
-    }
-
-    private func update(job: ShareJob, items: [ShareJobItem]) {
-        statusLabel.text = job.status.displayName
-        statusLabel.textColor = job.status.tintColor
-        titleLabel.text = job.displayName
-
-        let totalItems = max(job.totalItems, items.count)
-        let itemCountText = totalItems > 0 ? "\(totalItems) 首音轨" : "音轨数解析中"
-        metadataLabel.text = "\(job.type.displayName) · \(itemCountText)"
-
-        let progress = ShareDownloadDetail.progress(job: job, items: items)
-        progressView.setProgress(Float(progress), animated: true)
-        progressView.tintColor = job.status.tintColor
-
-        if totalItems > 0 {
-            let finishedItems = items.isEmpty
-                ? job.doneItems
-                : items.filter(\.status.countsAsDone).count
-            progressLabel.text = "\(min(finishedItems, totalItems))/\(totalItems) · \(Int((progress * 100).rounded()))%"
-        } else {
-            progressLabel.text = job.status.displayName
-        }
-
-        if let error = job.error, !error.isEmpty {
-            detailLabel.text = error
-        } else if let activeMessage = items.first(where: { $0.status.isActive })?.statusMessage,
-                  !activeMessage.isEmpty {
-            detailLabel.text = activeMessage
-        } else {
-            detailLabel.text = job.status.detailText
-        }
-
-        if let artworkURL = job.resolvedArtworkURL ?? items.compactMap(\.resolvedArtworkURL).first {
-            loadArtwork(from: artworkURL)
-        }
-    }
-
-    private func loadArtwork(from url: URL) {
-        guard displayedArtworkURL != url else { return }
-        displayedArtworkURL = url
-        artworkTask?.cancel()
-        artworkTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let (data, _) = try await session.data(from: url)
-                try Task.checkCancellation()
-                guard let image = UIImage(data: data), displayedArtworkURL == url else { return }
-                artworkView.image = image
-                artworkView.preferredSymbolConfiguration = nil
-                artworkView.backgroundColor = .clear
-                artworkView.contentMode = .scaleAspectFill
-            } catch {
-                if displayedArtworkURL == url {
-                    displayedArtworkURL = nil
-                }
-            }
-        }
-    }
-
-    private func showFailureState(message: String) {
-        artworkTask?.cancel()
-        displayedArtworkURL = nil
-        artworkView.image = UIImage(systemName: "exclamationmark.circle.fill")
-        artworkView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 44)
-        artworkView.tintColor = .systemRed
-        artworkView.backgroundColor = .secondarySystemBackground
-        artworkView.contentMode = .center
-        statusLabel.text = "创建失败"
-        statusLabel.textColor = .systemRed
-        titleLabel.text = "未能创建下载任务"
-        metadataLabel.text = "请检查网络或后端配置"
-        progressView.progress = 0
-        progressView.tintColor = .systemRed
-        progressLabel.text = "失败"
-        detailLabel.text = message
-        actionButton.configuration?.title = "重试"
-        actionButton.configuration?.image = UIImage(systemName: "arrow.clockwise")
-        actionButton.isHidden = false
     }
 }
 
@@ -450,10 +349,8 @@ private struct ShareDownloadSubmitResponse: Decodable {
         results.first { $0.status == "accepted" }
     }
 
-    var job: ShareJob? {
-        acceptedResult?.job
-    }
-
+    /// 已经有同样的任务在跑时后端不会再建一个，返回的是既有任务的 id——那也算成功，
+    /// 「打开 App」照样该落到那个任务上。
     var jobID: String? {
         acceptedResult?.job?.id ?? results.compactMap(\.existingJobID).first
     }
@@ -475,212 +372,21 @@ private struct ShareDownloadSubmitResult: Decodable {
     }
 }
 
-private struct ShareDownloadDetail: Decodable {
-    let job: ShareJob
-    let items: [ShareJobItem]
-
-    static func progress(job: ShareJob, items: [ShareJobItem]) -> Double {
-        guard !items.isEmpty else {
-            guard job.totalItems > 0 else { return 0 }
-            return min(max(Double(job.doneItems) / Double(job.totalItems), 0), 1)
-        }
-        return items.reduce(0) { $0 + $1.normalizedProgress } / Double(items.count)
-    }
-}
-
+/// 只取 id：面板不再显示任务详情，标题、封面、音轨数都用不上了。
 private struct ShareJob: Decodable {
     let id: String
-    let input: String
-    let type: ShareJobType
-    let title: String?
-    let artworkURL: String?
-    let status: ShareJobStatus
-    let totalItems: Int
-    let doneItems: Int
-    let error: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, input, type, title, status, error
-        case artworkURL = "artwork_url"
-        case totalItems = "total_items"
-        case doneItems = "done_items"
-    }
-
-    var displayName: String {
-        guard let title, !title.isEmpty else { return input }
-        return title
-    }
-
-    var resolvedArtworkURL: URL? {
-        Self.resolveArtworkURL(artworkURL)
-    }
-
-    static func resolveArtworkURL(_ template: String?) -> URL? {
-        guard let template, !template.isEmpty else { return nil }
-        return URL(string: template
-            .replacingOccurrences(of: "{w}", with: "312")
-            .replacingOccurrences(of: "{h}", with: "312")
-            .replacingOccurrences(of: "{f}", with: "jpg"))
-    }
-}
-
-/// 后端 `JobItem.progress` 的逐阶段拆分，本扩展自用的最小镜像。
-///
-/// 权重刻意与 app target 里 `ItemProgress`（DownloadsAPI.swift）保持一致，改一处
-/// 要同时改另一处：`LiveActivityShared/` 没有加入本扩展的 target 成员，import
-/// 不到那份定义，而单为一个共享结构体把整个共享目录（连同 ActivityKit 依赖）
-/// 拉进来并不划算。
-private struct ShareItemProgress: Decodable {
-    var download: Double = 0
-    var decrypt: Double = 0
-    var resolved: Bool = false
-    var remuxed: Bool = false
-    var verified: Bool = false
-    var tagged: Bool = false
-    var saved: Bool = false
-
-    private enum Weight {
-        static let resolved = 0.04
-        static let download = 0.56
-        static let decrypt = 0.26
-        static let remuxed = 0.06
-        static let verified = 0.03
-        static let tagged = 0.03
-    }
-
-    // 自定义 init(from:) 后 Decodable 不再合成 CodingKeys，得自己写。
-    private enum CodingKeys: String, CodingKey {
-        case download, decrypt, resolved, remuxed, verified, tagged, saved
-    }
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        download = try container.decodeIfPresent(Double.self, forKey: .download) ?? 0
-        decrypt = try container.decodeIfPresent(Double.self, forKey: .decrypt) ?? 0
-        resolved = try container.decodeIfPresent(Bool.self, forKey: .resolved) ?? false
-        remuxed = try container.decodeIfPresent(Bool.self, forKey: .remuxed) ?? false
-        verified = try container.decodeIfPresent(Bool.self, forKey: .verified) ?? false
-        tagged = try container.decodeIfPresent(Bool.self, forKey: .tagged) ?? false
-        saved = try container.decodeIfPresent(Bool.self, forKey: .saved) ?? false
-    }
-
-    init() {}
-
-    var fraction: Double {
-        if saved { return 1 }
-        var value = 0.0
-        if resolved { value += Weight.resolved }
-        value += Weight.download * min(max(download, 0), 1)
-        value += Weight.decrypt * min(max(decrypt, 0), 1)
-        if remuxed { value += Weight.remuxed }
-        if verified { value += Weight.verified }
-        if tagged { value += Weight.tagged }
-        return min(max(value, 0), 1)
-    }
-}
-
-private struct ShareJobItem: Decodable {
-    let artworkURL: String?
-    let status: ShareJobItemStatus
-    let progress: ShareItemProgress
-    let statusMessage: String?
-
-    enum CodingKeys: String, CodingKey {
-        case status, progress
-        case artworkURL = "artwork_url"
-        case statusMessage = "status_message"
-    }
-
-    /// 终态直接算满格：`skipped_existing` 的拆分全是零值，因为它一个阶段都没跑。
-    var normalizedProgress: Double {
-        switch status {
-        case .completed, .skippedExisting:
-            1
-        default:
-            progress.fraction
-        }
-    }
-
-    var resolvedArtworkURL: URL? {
-        ShareJob.resolveArtworkURL(artworkURL)
-    }
-}
-
-private enum ShareJobType: String, Decodable {
-    case song, album, playlist, artist, station
-
-    var displayName: String {
-        switch self {
-        case .song: "歌曲"
-        case .album: "专辑"
-        case .playlist: "歌单"
-        case .artist: "艺人"
-        case .station: "电台"
-        }
-    }
-}
-
-private enum ShareJobStatus: String, Decodable {
-    case queued, running, completed, failed, cancelled
-
-    var isActive: Bool {
-        self == .queued || self == .running
-    }
-
-    var displayName: String {
-        switch self {
-        case .queued: "排队中"
-        case .running: "正在下载"
-        case .completed: "下载完成"
-        case .failed: "下载失败"
-        case .cancelled: "已取消"
-        }
-    }
-
-    var detailText: String {
-        switch self {
-        case .queued: "任务正在等待后端处理"
-        case .running: "下载进度会自动刷新"
-        case .completed: "所有音轨均已处理完毕"
-        case .failed: "任务处理失败"
-        case .cancelled: "任务已被取消"
-        }
-    }
-
-    var tintColor: UIColor {
-        switch self {
-        case .queued, .running: .systemBlue
-        case .completed: .systemGreen
-        case .failed: .systemRed
-        case .cancelled: .secondaryLabel
-        }
-    }
-}
-
-private enum ShareJobItemStatus: String, Decodable {
-    case queued, resolving, downloading, decrypting, remuxing, tagging, saving
-    case completed, failed, cancelled
-    case skippedExisting = "skipped_existing"
-
-    var isActive: Bool {
-        switch self {
-        case .queued, .resolving, .downloading, .decrypting, .remuxing, .tagging, .saving:
-            true
-        case .completed, .failed, .cancelled, .skippedExisting:
-            false
-        }
-    }
-
-    var countsAsDone: Bool {
-        self == .completed || self == .skippedExisting
-    }
 }
 
 private struct BackendError: Decodable {
     let error: String?
     let message: String?
+    /// `/api/gw/*` 用的是 RFC 9457 problem+json，机器码在 `code` 里；`/api/v1/*`
+    /// 保持后端原来的 `{"error":...}`。两边的**值是同一张表**，所以一个结构解两种。
+    let code: String?
+    let detail: String?
 
-    var displayMessage: String? { message ?? error }
+    var machineCode: String? { code ?? error }
+    var displayMessage: String? { detail ?? message ?? error }
 }
 
 private enum ShareSubmissionError: LocalizedError {
@@ -688,6 +394,9 @@ private enum ShareSubmissionError: LocalizedError {
     case invalidBackendURL
     case invalidResponse
     case rejected(message: String?)
+    /// 账号状态挡住了这次提交（等待批准 / 已停用 / 登录过期）。和 `.server` 分开，
+    /// 是因为它们不是"出错了，重试一下"，而是"去做另一件事"。
+    case notReady(String)
     case server(status: Int, message: String?)
 
     var errorDescription: String? {
@@ -700,6 +409,8 @@ private enum ShareSubmissionError: LocalizedError {
             "后端返回了无效响应"
         case let .rejected(message):
             message ?? "后端没有接受这个下载任务"
+        case let .notReady(message):
+            message
         case let .server(status, message):
             message ?? "后端请求失败 (\(status))"
         }

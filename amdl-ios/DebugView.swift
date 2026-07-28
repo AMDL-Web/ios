@@ -65,7 +65,19 @@ struct DebugView: View {
             Section {
                 if appleAuth.isSignedIn {
                     LabeledContent("账号", value: appleAuth.email ?? "已登录")
-                    LabeledContent("令牌", value: appleTokenStatusText)
+                    LabeledContent("会话", value: appleTokenStatusText)
+                    // 每个新账号第一次登录后都会停在这里等管理员点批准。这句话必须
+                    // 说清楚"登录是成功的、要等的是别人"，否则用户只会看见后面每个
+                    // 请求都 403，然后以为是自己登录失败了。
+                    if appleAuth.isPendingApproval {
+                        Label {
+                            Text("账号正在等待管理员批准。批准之后不用重新登录，直接就能用。")
+                        } icon: {
+                            Image(systemName: "clock.badge.questionmark")
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                    }
                     Button(role: .destructive, action: appleAuth.signOut) {
                         Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
                     }
@@ -91,7 +103,7 @@ struct DebugView: View {
             } header: {
                 Text("网关认证")
             } footer: {
-                Text("后端和实时活动网关都在 oauth2-proxy 后面，请求需要带上「通过 Apple 登录」签发的身份令牌。有效期约 24 小时，过期后无法静默续期，需要回到这里重新获取。令牌只会发给网关域名，封面等第三方资源不会带上。")
+                Text("「通过 Apple 登录」拿到的身份令牌只用来换一次门户会话，之后请求带的是门户签发的令牌：有效期 1 小时，过期自动续，续期凭证 60 天，所以正常情况下不需要再回到这里。令牌存在钥匙串里，只会发给门户域名，封面等第三方资源不会带上。")
             }
 
             Section("Apple Music") {
@@ -137,10 +149,13 @@ struct DebugView: View {
         .onAppear { appleAuth.refreshFromStore() }
     }
 
+    /// 门户 access token 的剩余时间。**过期不等于要重新登录**——刷新是自动的，
+    /// 这里显示的是"下一次自动续期还有多久"，所以文案不能说"已过期，请重新登录"。
     private var appleTokenStatusText: String {
-        guard let expiresAt = appleAuth.expiresAt else { return "无" }
+        guard appleAuth.hasValidToken else { return "无" }
+        guard let expiresAt = appleAuth.expiresAt else { return "有效" }
         let remaining = expiresAt.timeIntervalSinceNow
-        guard remaining > 0 else { return "已过期" }
+        guard remaining > 0 else { return "将自动续期" }
         return "剩余 \(Int(remaining / 60)) 分 \(Int(remaining.truncatingRemainder(dividingBy: 60))) 秒"
     }
 

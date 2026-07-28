@@ -21,9 +21,14 @@ enum LiveActivityGatewayError: LocalizedError {
 }
 
 enum LiveActivityGatewayAPI {
-    /// 同 `DownloadsAPI.defaultBaseURLString`，走同一个网关域名，只是网关把
-    /// `/apns` 前缀剥掉后转给 APNs 推送后端，所以这里必须带上该前缀。
-    static let defaultBaseURLString = "https://backend-dev-amdl.lyjw131.com/apns"
+    /// 同 `DownloadsAPI.defaultBaseURLString`，走同一个域名，只是那一端把 `/apns`
+    /// 前缀剥掉后转给 APNs 推送后端（`amdl-ios-gateway`），所以这里必须带上该前缀。
+    ///
+    /// 剥前缀的活儿从 Traefik 搬到了门户：以前是 `amdl-apns-strip` 这个 stripPrefix
+    /// 中间件，现在是门户策略表里的 `/apns/*` 那几行。对 App 来说地址形状没变，
+    /// **但那个 router 已经不存在了**——`amdl-ios-gateway` 现在只在内网，不经过门户
+    /// 就没有任何路径能注册设备令牌，实时活动会静悄悄地再也不出现。
+    static let defaultBaseURLString = "https://amdl.lyjw131.com/apns"
     private static let baseURLKey = "liveActivityGatewayBaseURL"
     private static let deviceIDKey = "liveActivityGatewayDeviceID"
 
@@ -96,13 +101,10 @@ enum LiveActivityGatewayAPI {
         guard let url = makeURL(path: "/health") else {
             throw LiveActivityGatewayError.invalidURL
         }
-        var request = URLRequest(authorizedURL: url)
+        var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw LiveActivityGatewayError.invalidResponse
-        }
+        let (data, httpResponse) = try await PortalHTTP.send(request)
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw LiveActivityGatewayError.server(httpResponse.statusCode)
         }
@@ -113,15 +115,15 @@ enum LiveActivityGatewayAPI {
         guard let url = makeURL(path: path) else {
             throw LiveActivityGatewayError.invalidURL
         }
-        var request = URLRequest(authorizedURL: url)
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw LiveActivityGatewayError.invalidResponse
-        }
+        // 必须走 PortalHTTP：门户是这条路唯一的入口（`/apns/*` 转发给
+        // amdl-ios-gateway），而且它靠请求上的会话来断言这台设备属于谁——
+        // 没有凭据就注册不上，注册不上就再也收不到实时活动，而且**没有任何报错**。
+        let (_, httpResponse) = try await PortalHTTP.send(request)
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw LiveActivityGatewayError.server(httpResponse.statusCode)
         }

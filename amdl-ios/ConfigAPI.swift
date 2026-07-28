@@ -172,7 +172,7 @@ enum ConfigAPI {
     /// 读取当前配置。后端会先尝试重新加载 config.yaml，再返回最近一次可用配置。
     static func getConfig() async throws -> ConfigResponse {
         let url = try makeURL()
-        var request = URLRequest(authorizedURL: url)
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         return try await send(request)
@@ -181,7 +181,7 @@ enum ConfigAPI {
     /// 提交配置。请求体是（可能部分的）RuntimeConfig，后端对缺省键做深合并。
     static func updateConfig(_ config: RuntimeConfig) async throws -> ConfigResponse {
         let url = try makeURL()
-        var request = URLRequest(authorizedURL: url)
+        var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(config)
@@ -197,11 +197,9 @@ enum ConfigAPI {
     /// 一个开关，也不要显示一个其实不生效的开关。
     static func signedModeEnabled() async -> Bool {
         guard let url = try? makeURL(path: "/api/v1/developer-token") else { return false }
-        var request = URLRequest(authorizedURL: url)
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        guard let (_, response) = try? await URLSession.shared.data(for: request),
-              let httpResponse = response as? HTTPURLResponse
-        else {
+        guard let (_, httpResponse) = try? await PortalHTTP.send(request) else {
             return false
         }
         return httpResponse.statusCode == 200
@@ -220,16 +218,12 @@ enum ConfigAPI {
     }
 
     private static func send(_ request: URLRequest) async throws -> ConfigResponse {
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw DownloadsAPIError.invalidResponse
-        }
+        // 走 PortalHTTP：它续 token、401 后重试一次，并把 403 的 pending_approval
+        // 翻成人话。这两个端点在门户策略表里是 **admin only**，所以普通用户会拿到
+        // 403 forbidden——那是正确行为，不是 bug。
+        let (data, httpResponse) = try await PortalHTTP.send(request)
         guard httpResponse.statusCode == 200 else {
-            let backendError = try? JSONDecoder().decode(ConfigErrorResponse.self, from: data)
-            throw DownloadsAPIError.server(
-                status: httpResponse.statusCode,
-                message: backendError?.message ?? backendError?.error
-            )
+            throw DownloadsAPI.serverError(status: httpResponse.statusCode, data: data)
         }
 
         var result = try JSONDecoder().decode(ConfigResponse.self, from: data)

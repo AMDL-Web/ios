@@ -736,6 +736,79 @@ struct amdl_iosTests {
         )
     }
 
+    /// 和动态封面同理：`artist_url` 是手工镜像后端 openapi 的，键名写错只会安静地
+    /// 解不出来，艺人跳转永远退回站内搜索，没人会注意到。
+    @Test func jobDecodesArtistURLKey() throws {
+        let json = """
+        {
+          "job": {
+            "id": "job_1",
+            "input": "https://music.apple.com/cn/album/example/1858184006",
+            "type": "album",
+            "force": false,
+            "status": "completed",
+            "total_items": 5,
+            "done_items": 5,
+            "failed_items": 0,
+            "created_at": "2026-07-26T00:00:00Z",
+            "updated_at": "2026-07-26T00:00:00Z",
+            "artist_name": "星街すいせい",
+            "artist_url": "https://music.apple.com/cn/artist/hoshimachi-suisei/1013919"
+          },
+          "items": []
+        }
+        """.data(using: .utf8)!
+
+        let job = try DownloadsAPI.decodeDownloadDetail(from: json).job
+        try assert(
+            job.artistURL == "https://music.apple.com/cn/artist/hoshimachi-suisei/1013919",
+            "artist url decodes"
+        )
+        let destination = try #require(AppleMusicLinks.artistDestination(for: job, name: "星街すいせい"))
+        try assert(
+            destination.absoluteString == "https://music.apple.com/cn/artist/hoshimachi-suisei/1013919",
+            "the decoded url is what the artist tap opens"
+        )
+    }
+
+    /// 艺人页链接由后端随任务下发（artist_url），点艺人名就直接用它。
+    @Test func artistDestinationUsesTheBackendArtistURL() throws {
+        var job = albumJob(input: "https://music.apple.com/cn/album/example/1858184006")
+        job.artistURL = "https://music.apple.com/cn/artist/example/1013919"
+        let url = try #require(AppleMusicLinks.artistDestination(for: job, name: "Example"))
+        try assert(
+            url.absoluteString == "https://music.apple.com/cn/artist/example/1013919",
+            "the backend artist page wins"
+        )
+    }
+
+    /// `artist_url` 出现之前解析的老任务没有这个字段，退回站内搜艺人名，区域跟着
+    /// 任务链接走。
+    @Test func artistDestinationFallsBackToSearchWithoutTheField() throws {
+        let job = albumJob(input: "https://music.apple.com/cn/album/example/1858184006")
+        let url = try #require(AppleMusicLinks.artistDestination(for: job, name: "星街すいせい"))
+        let expected = "https://music.apple.com/cn/search?term=%E6%98%9F%E8%A1%97%E3%81%99%E3%81%84%E3%81%9B%E3%81%84"
+        try assert(url.absoluteString == expected, "fallback searches the name in the link's storefront")
+    }
+
+    /// 歌单/电台的副标题是策展人，没有对应的艺人页，不该做成可点。
+    @Test func artistPageIsOfferedOnlyForSongsAndAlbums() throws {
+        let playlist = albumJob(input: "https://music.apple.com/cn/playlist/example/pl.1", type: .playlist)
+        try assert(!AppleMusicLinks.canOpenArtistPage(for: playlist), "playlists have no artist page")
+        try assert(
+            AppleMusicLinks.canOpenArtistPage(for: albumJob(input: "https://music.apple.com/cn/album/e/1")),
+            "albums have an artist page"
+        )
+    }
+
+    /// 手输的非链接 input（如 `id:123`）不能做成可点的标题。
+    @Test func collectionLinkIgnoresNonWebInput() throws {
+        try assert(
+            AppleMusicLinks.collectionURL(for: albumJob(input: "id:1858184006")) == nil,
+            "non-http input is not a tappable link"
+        )
+    }
+
     private func albumJob(input: String, type: JobType = .album) -> Job {
         Job(
             id: "job_album",
@@ -763,5 +836,114 @@ struct amdl_iosTests {
 
     private struct TestFailure: Error {
         let message: String
+    }
+}
+
+// MARK: - amdl-portal 会话（Milestone 7）
+
+@MainActor
+struct PortalAuthTests {
+
+    /// 三个默认地址必须一起指向门户。
+    ///
+    /// 它们分头写在三个文件里（主 App、实时活动网关、分享扩展），历史上就是靠人
+    /// 记得同步——而漏掉任何一个的后果都不一样地难查：主 App 打错域名会立刻报错，
+    /// 但**实时活动网关打错只会静悄悄地再也不出现进度条**，App 那边一句错都不报。
+    @Test func defaultEndpointsPointAtThePortal() {
+        #expect(DownloadsAPI.defaultBaseURLString == "https://amdl.lyjw131.com")
+        // 必须保留 /apns 后缀：门户把这个前缀剥掉之后才转给 amdl-ios-gateway，
+        // 那台机器只认识 /v1/... 和 /health。
+        #expect(LiveActivityGatewayAPI.defaultBaseURLString == "https://amdl.lyjw131.com/apns")
+        #expect(LiveActivityGatewayAPI.defaultBaseURLString.hasPrefix(DownloadsAPI.defaultBaseURLString))
+    }
+
+    /// 令牌只发给门户域名。封面可能来自 Apple CDN 或对象存储，把会话令牌发给
+    /// 第三方既没必要也不安全。
+    @Test func bearerGoesOnlyToThePortalHost() {
+        #expect(AppleAuthCredentialStore.isGatewayHost("amdl.lyjw131.com"))
+        #expect(AppleAuthCredentialStore.isGatewayHost("AMDL.LYJW131.COM"))
+        #expect(!AppleAuthCredentialStore.isGatewayHost("is5-ssl.mzstatic.com"))
+        #expect(!AppleAuthCredentialStore.isGatewayHost("amdl.lyjw131.com.evil.example"))
+        #expect(!AppleAuthCredentialStore.isGatewayHost(nil))
+        #expect(!AppleAuthCredentialStore.isGatewayHost(""))
+    }
+
+    /// 两种错误体形状、同一张码表（DESIGN.md §6.3）。
+    ///
+    /// `/api/gw/*` 是 problem+json，机器码在 `code`；`/api/v1/*` 保持后端的
+    /// `{"error":...}`。客户端只该有一份码表，所以两种都得解得出同一个结论。
+    @Test func pendingApprovalIsRecognisedInBothErrorShapes() throws {
+        let problemJSON = Data(#"""
+        {"type":"about:blank","title":"Forbidden","status":403,
+         "detail":"this account is awaiting approval","code":"pending_approval"}
+        """#.utf8)
+        let mirrorJSON = Data(#"{"error":"pending_approval"}"#.utf8)
+
+        for body in [problemJSON, mirrorJSON] {
+            let decoded = try #require(PortalErrorBody.decode(from: body))
+            #expect(decoded.resolvedCode == "pending_approval")
+            guard case .pendingApproval = try #require(decoded.authError(status: 403)) else {
+                Issue.record("403 pending_approval 没有被识别出来")
+                return
+            }
+        }
+    }
+
+    /// 「等待批准」必须是一句人话。**每个新用户第一次进来看到的就是它**：门户给
+    /// pending 账号也发凭据（好让 App 能调 /api/gw/me 问出自己的状态），别的接口
+    /// 一律 403 —— 如果这里只剩「服务器错误 (403)」，用户唯一能得出的结论是登录坏了。
+    @Test func pendingApprovalHasAComprehensibleMessage() throws {
+        let message = try #require(PortalAuthError.pendingApproval.errorDescription)
+        #expect(message.contains("批准"))
+        #expect(!message.contains("403"))
+        #expect(!message.contains("error"))
+
+        // 停用和登录过期同理：都要说清楚下一步该做什么。
+        #expect(try #require(PortalAuthError.suspended.errorDescription).contains("停用"))
+        #expect(try #require(PortalAuthError.needsSignIn.errorDescription).contains("登录"))
+    }
+
+    /// 未知的错误码不许被当成认证问题吞掉——那会把一个真的服务器故障显示成
+    /// 「请重新登录」，然后用户反复登录也没用。
+    @Test func unknownCodesAreNotTreatedAsAuthErrors() throws {
+        let decoded = try #require(PortalErrorBody.decode(from: Data(#"{"error":"queue_full"}"#.utf8)))
+        #expect(decoded.authError(status: 422) == nil)
+    }
+
+    /// access token 的可用性判断留了余量：卡着到期时刻发出去的请求会在路上过期，
+    /// 白跑一趟 401。
+    @Test func accessTokenNeedsHeadroomBeforeExpiry() {
+        let almostExpired = PortalCredentials(
+            accessToken: "a", refreshToken: "r",
+            accessTokenExpiresAt: Date().addingTimeInterval(30)
+        )
+        let fresh = PortalCredentials(
+            accessToken: "a", refreshToken: "r",
+            accessTokenExpiresAt: Date().addingTimeInterval(3600)
+        )
+        #expect(!almostExpired.isAccessTokenUsable)
+        #expect(fresh.isAccessTokenUsable)
+    }
+
+    /// 凭据的编码形状是**跨 target 的契约**：分享扩展没有共享源码目录，它自己手抄
+    /// 了一份解码器，只认 `accessToken` 这个键。改字段名会让分享面板静默地不带令牌。
+    @Test func storedCredentialsKeepTheKeyNamesTheExtensionReads() throws {
+        let encoded = try JSONEncoder().encode(PortalCredentials(
+            accessToken: "token-value", refreshToken: "refresh-value",
+            accessTokenExpiresAt: Date()
+        ))
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        #expect(object["accessToken"] as? String == "token-value")
+        #expect(object["refreshToken"] as? String == "refresh-value")
+    }
+
+    /// Keychain 的 access group 用的是 App Group id。四个 target 的 entitlements
+    /// 里已经都有它，所以共享凭据**不需要新增任何 entitlement**——这一点值得钉住，
+    /// 因为改 entitlement 要重新配 provisioning。
+    @Test func keychainAccessGroupIsTheExistingAppGroup() {
+        #expect(PortalCredentialStore.accessGroup == DownloadsAPI.appGroupIdentifier)
+        #expect(PortalCredentialStore.accessGroup == "group.com.lyjw131.amdl.amdl-ios")
     }
 }
