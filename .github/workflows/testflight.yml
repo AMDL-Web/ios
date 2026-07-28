@@ -101,6 +101,14 @@ jobs:
           # run_number 由 GitHub 单调递增维护,天然满足。
           BUILD_NUMBER="${{ github.run_number }}"
 
+          # 解析不出版本号就地失败。以前空值会一路传下去,产物里的
+          # CFBundleShortVersionString 变成空字符串,直到 App Store Connect 退回
+          # 才发现。
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+            echo "::error::解析出的版本号 '$VERSION' 不是 X.Y 或 X.Y.Z 形式,无法发版。"
+            exit 1
+          fi
+
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "build=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
           echo "发布版本: $VERSION (build $BUILD_NUMBER)"
@@ -157,19 +165,12 @@ jobs:
           printf '%s' "$APPSTORE_PRIVATE_KEY" > ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8
           chmod 600 ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8
 
-      - name: Set version and build number
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          BUILD: ${{ steps.version.outputs.build }}
-        run: |
-          # 直接改工程设置，不落地成提交——发版产物的版本号由 CI 决定。
-          xcrun agvtool new-marketing-version "$VERSION"
-          xcrun agvtool new-version -all "$BUILD"
-
       - name: Archive
         env:
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
         run: |
           set -o pipefail
           # 归档必须真正签名，否则 Xcode 跳过 entitlements 处理，产物里
@@ -179,6 +180,24 @@ jobs:
           # 命令行下自动签名固定解析成开发身份，所以上一步导入了开发证书；
           # -allowProvisioningUpdates 配合 API key 按需创建开发描述文件。
           # 分发签名在后面的 -exportArchive 完成，那才是 Xcode 的正常流程。
+          #
+          # 版本号直接作为构建设置传进来，**不再用 agvtool**。
+          # 以前这里前面有一步 `xcrun agvtool new-marketing-version "$VERSION"`，
+          # 它从来没起过作用，而且退出码是 0、日志还打印 "Updated ... to 2.0"，
+          # 所以 v1.1 / v1.3 / v2.0 三次发版全都以 1.0 上传，没人发现：
+          #   - agvtool 的 new-marketing-version 只会改 Info.plist 文件里**已经
+          #     存在**的 CFBundleShortVersionString 键，它不碰 MARKETING_VERSION
+          #     这个构建设置；
+          #   - 本工程所有 target 都是 GENERATE_INFOPLIST_FILE = YES，源码里的
+          #     Info.plist 根本没有 CFBundleShortVersionString 这一项，
+          #     产物里的那一项是 Xcode 从 $(MARKETING_VERSION) 生成的。
+          #     于是 agvtool 一个字节都没写，MARKETING_VERSION 始终是 1.0。
+          # 构建号之所以一直是对的，是因为 `agvtool new-version -all` 另有一条
+          # 路径会把 CURRENT_PROJECT_VERSION 写进 project.pbxproj —— 而
+          # new-marketing-version 没有对应的那一半。
+          #
+          # 命令行构建设置对本次构建里的**每个** target 生效，主 App 和三个扩展
+          # 因此天然一致，不需要逐个 target 去改工程文件。
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -188,7 +207,62 @@ jobs:
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8 \
             -authenticationKeyID "$APPSTORE_KEY_ID" \
-            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID"
+            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD"
+
+      - name: Verify archived version numbers
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          # 唯一可信的证据是产物本身。上一步的构建设置有没有真的落到
+          # CFBundleShortVersionString 上，只有读归档里的 Info.plist 才知道 ——
+          # 工作流文件写得再对也不算数，这个 bug 就是这么活过三次发版的。
+          #
+          # 扩展的版本号必须和主 App 完全一致，否则 App Store Connect 会以
+          # CFBundleShortVersionString / CFBundleVersion mismatch 拒收整个包。
+          APP="$RUNNER_TEMP/amdl-ios.xcarchive/Products/Applications/amdl-ios.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::归档里没有找到 $APP"
+            exit 1
+          fi
+
+          FAILED=0
+          check() {
+            local label="$1" plist="$2"
+            local short build
+            short=$(plutil -extract CFBundleShortVersionString raw -o - "$plist" 2>/dev/null || echo "<缺失>")
+            build=$(plutil -extract CFBundleVersion raw -o - "$plist" 2>/dev/null || echo "<缺失>")
+            echo "$label: $short ($build)"
+            if [ "$short" != "$VERSION" ]; then
+              echo "::error::$label 的 CFBundleShortVersionString 是 '$short'，期望 '$VERSION'。"
+              FAILED=1
+            fi
+            if [ "$build" != "$BUILD" ]; then
+              echo "::error::$label 的 CFBundleVersion 是 '$build'，期望 '$BUILD'。"
+              FAILED=1
+            fi
+          }
+
+          check "amdl-ios.app" "$APP/Info.plist"
+          # 三个扩展一个都不能漏：只有一个掉队也会被拒收。
+          EXTENSIONS=0
+          for appex in "$APP"/PlugIns/*.appex; do
+            [ -d "$appex" ] || continue
+            EXTENSIONS=$((EXTENSIONS + 1))
+            check "$(basename "$appex")" "$appex/Info.plist"
+          done
+          if [ "$EXTENSIONS" -ne 3 ]; then
+            echo "::error::归档里只有 $EXTENSIONS 个扩展，期望 3 个（分享 / 实时活动 / 通知服务）。"
+            FAILED=1
+          fi
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::归档里的版本号和期望的 $VERSION ($BUILD) 不一致，中止发版。"
+            exit 1
+          fi
+          echo "归档版本号校验通过: $VERSION ($BUILD)"
 
       - name: Export ipa
         env:
