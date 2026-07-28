@@ -51,6 +51,9 @@ struct DownloadDetailSummaryView: View {
     let palette: DownloadDetailPalette?
     @Binding var presentedQualityDetails: AudioQualityPresentation.Details?
 
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.openURL) private var openURL
+
     private static let artistLineColor = Color(red: 0.98, green: 0.137, blue: 0.231)
 
     private var headlineSubtitle: String? {
@@ -111,22 +114,29 @@ struct DownloadDetailSummaryView: View {
                     MotionArtworkView(job: job)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .shadow(color: .black.opacity(0.12), radius: 16, y: 4)
+                // 半透明细描边。封面边缘那一圈像素常常和背景同色（背景本来就是从
+                // 封面取的），只靠投影总有一小段边化在底色里。描边取调色板的主文字
+                // 色——它对背景的对比度是有保证的，浅底出深边、深底出浅边，比写死
+                // 白色稳。宽度按屏幕像素算，永远是实打实的一物理像素。
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(
+                            (palette?.primaryText ?? Color.primary).opacity(0.15),
+                            lineWidth: 1 / displayScale
+                        )
+                }
+                // Apple Music 的封面不是直接贴在底色上的：一层扩散开的环境影把它
+                // 从背景里托起来，再加一层贴边的接触影收住轮廓。
+                .shadow(color: .black.opacity(0.28), radius: 18, y: 10)
+                .shadow(color: .black.opacity(0.14), radius: 4, y: 1)
                 .padding(.horizontal, 32.5)
                 .padding(.bottom, 11.5)
 
             VStack(spacing: 2) {
-                Text(job.displayName)
-                    .font(.title2.bold())
-                    .foregroundStyle(palette?.primaryText ?? Color.primary)
-                    .multilineTextAlignment(.center)
+                titleLabel
 
                 if let headlineSubtitle {
-                    Text(headlineSubtitle)
-                        .font(.title3)
-                        .foregroundStyle(palette?.secondaryText ?? Self.artistLineColor)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 1.5)
+                    subtitleLabel(headlineSubtitle)
                 }
 
                 JobCaptionRow(
@@ -174,6 +184,52 @@ struct DownloadDetailSummaryView: View {
         .padding(.horizontal, 20)
         .padding(.top, 30.5)
         .padding(.bottom, albumTracksOmitSubtitles ? 28.167 : 29.5)
+    }
+
+    /// 标题点进 Apple Music 的专辑/单曲页。`input` 不是链接时保持纯文本，不给一个
+    /// 点了没反应的手势。
+    @ViewBuilder
+    private var titleLabel: some View {
+        let title = Text(job.displayName)
+            .font(.title2.bold())
+            .foregroundStyle(palette?.primaryText ?? Color.primary)
+            .multilineTextAlignment(.center)
+
+        if let url = AppleMusicLinks.collectionURL(for: job) {
+            Button {
+                openURL(url)
+            } label: {
+                title.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("在 Apple Music 中打开")
+        } else {
+            title
+        }
+    }
+
+    /// 单曲/专辑的副标题是艺人名，点它去艺人页；歌单和电台那一行是策展人，没有对应
+    /// 页面，保持纯文本。
+    @ViewBuilder
+    private func subtitleLabel(_ text: String) -> some View {
+        let subtitle = Text(text)
+            .font(.title3)
+            .foregroundStyle(palette?.secondaryText ?? Self.artistLineColor)
+            .multilineTextAlignment(.center)
+            .padding(.top, 1.5)
+
+        if AppleMusicLinks.canOpenArtistPage(for: job),
+           let url = AppleMusicLinks.artistDestination(for: job, name: text) {
+            Button {
+                openURL(url)
+            } label: {
+                subtitle.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("在 Apple Music 中打开艺人页")
+        } else {
+            subtitle
+        }
     }
 
     @ViewBuilder
@@ -233,6 +289,52 @@ enum TrackDurationSummary {
         let hours = totalMinutes / 60
         let minutes = totalMinutes % 60
         return minutes == 0 ? "\(hours) 小时" : "\(hours) 小时 \(minutes) 分钟"
+    }
+}
+
+/// 曲目总大小的展示格式。`file_size` 要等文件落盘（或发现已存在）才有值，所以在此
+/// 之前用「码率 × 时长」估算，并给每首补一份元数据开销——封面图和标签在成品文件里
+/// 真实占位，却算不进音频码率。只要还有一首是估出来的，整行就说「约」；每首都拿到
+/// 真实大小才说「共」。一首都算不出（如 aac-lc 没有逐曲清单可读码率，且尚未下载）
+/// 时返回 nil，宁可不显示也不瞎猜。
+enum TrackSizeSummary {
+    /// 每首歌的元数据补偿字节数。按十进制 MB 记，与展示用的 `.file` 口径一致。
+    private static let metadataOverheadBytes = 1_500_000.0
+
+    static func totalSizeText(for items: [JobItem]) -> String? {
+        // 同一张专辑各曲码率一致，所以某首还没解析出码率时，用已知曲目的均值顶上——
+        // 只要有一首进了下载阶段，整张专辑就能给出估算。
+        let fallbackBitrate = representativeBitrate(for: items)
+        var exactBytes: Int64 = 0
+        var estimatedBytes = 0.0
+        var hasEstimate = false
+
+        for item in items {
+            if let fileSize = item.fileSize, fileSize > 0 {
+                exactBytes += fileSize
+                continue
+            }
+            guard let durationMs = item.durationMs, durationMs > 0 else { continue }
+            guard let bitrate = positive(item.bitrate) ?? fallbackBitrate else { continue }
+            estimatedBytes += Double(bitrate) * (Double(durationMs) / 1000) / 8 + metadataOverheadBytes
+            hasEstimate = true
+        }
+
+        let total = exactBytes + Int64(estimatedBytes.rounded())
+        guard total > 0 else { return nil }
+        let formatted = total.formatted(.byteCount(style: .file))
+        return hasEstimate ? "约 \(formatted)" : "共 \(formatted)"
+    }
+
+    private static func representativeBitrate(for items: [JobItem]) -> Int? {
+        let known = items.compactMap { positive($0.bitrate) }
+        guard !known.isEmpty else { return nil }
+        return known.reduce(0, +) / known.count
+    }
+
+    private static func positive(_ value: Int?) -> Int? {
+        guard let value, value > 0 else { return nil }
+        return value
     }
 }
 
@@ -313,31 +415,42 @@ enum CaptionSegment: Identifiable {
     }
 }
 
-struct DownloadDetailFooterView: View {
-    let job: Job
-    let items: [JobItem]
-    let palette: DownloadDetailPalette?
-
-    private static let releaseDateParser: DateFormatter = {
+/// 发行日期（后端给的是 `YYYY-MM-DD`）的长格式展示。集合页底注和「详细信息」表
+/// 共用；解析不出来时原样返回，宁可显示原始字符串也不吞掉。
+enum ReleaseDatePresentation {
+    private static let parser: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
 
-    private var formattedReleaseDate: String? {
-        guard let raw = job.releaseDate, !raw.isEmpty else { return nil }
-        guard let date = Self.releaseDateParser.date(from: raw) else { return raw }
+    static func longText(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        guard let date = parser.date(from: raw) else { return raw }
         return date.formatted(date: .long, time: .omitted)
+    }
+}
+
+struct DownloadDetailFooterView: View {
+    let job: Job
+    let items: [JobItem]
+    let palette: DownloadDetailPalette?
+
+    private var formattedReleaseDate: String? {
+        ReleaseDatePresentation.longText(job.releaseDate)
     }
 
     private var songCountText: String? {
         guard job.totalItems > 0 else { return nil }
-        let base = "\(job.totalItems) 首歌"
-        guard let totalDurationText = TrackDurationSummary.totalDurationText(for: items) else {
-            return base
+        var parts = ["\(job.totalItems) 首歌"]
+        if let totalDurationText = TrackDurationSummary.totalDurationText(for: items) {
+            parts.append(totalDurationText)
         }
-        return "\(base)，\(totalDurationText)"
+        if let totalSizeText = TrackSizeSummary.totalSizeText(for: items) {
+            parts.append(totalSizeText)
+        }
+        return parts.joined(separator: "，")
     }
 
     var body: some View {

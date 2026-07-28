@@ -25,6 +25,7 @@ struct DownloadDetailView: View {
     @State private var errorMessage: String?
     @State private var lastEventID: Int64 = 0
     @State private var presentedQualityDetails: AudioQualityPresentation.Details?
+    @State private var isShowingInfo = false
     private var job: Job? {
         detail?.job ?? initialJob
     }
@@ -115,8 +116,13 @@ struct DownloadDetailView: View {
         .toolbar {
             if !usesZoomTransition || barItemsVisible {
                 ToolbarItem(placement: .topBarTrailing) {
-                    if let appleMusicURL {
-                        DownloadDetailLinkActions(taskURL: appleMusicURL)
+                    // 「详细信息」不依赖链接可用，所以这里跟着任务本身出现；
+                    // input 不是 http(s) 时只是少掉 Apple Music 入口和复制链接。
+                    if job != nil {
+                        DownloadDetailLinkActions(
+                            taskURL: appleMusicURL,
+                            showInfo: { isShowingInfo = true }
+                        )
                     }
                 }
             }
@@ -131,6 +137,11 @@ struct DownloadDetailView: View {
         .onAppear(perform: configureNavigationBarFade)
         .task(id: jobID) {
             await runDetailLifecycle()
+        }
+        .sheet(isPresented: $isShowingInfo) {
+            if let job {
+                DownloadDetailInfoView(job: job, items: items, hooks: hooks)
+            }
         }
         .alert(item: $presentedQualityDetails) { details in
             Alert(
@@ -181,7 +192,7 @@ struct DownloadDetailView: View {
                     jobID: jobID,
                     lastEventID: lastEventID
                 )
-                let socket = URLSession.shared.authorizedWebSocketTask(with: url)
+                let socket = await URLSession.shared.authorizedWebSocketTask(with: url)
                 socket.resume()
 
                 try await withTaskCancellationHandler {
@@ -194,10 +205,6 @@ struct DownloadDetailView: View {
                         guard event.id > lastEventID else { continue }
                         lastEventID = event.id
                         guard detail?.apply(event) == true else { continue }
-
-                        // 每条推送落地后重算聚合速度，刷新频率即跟随推送频率。
-                        if let detail {
-                        }
 
                         if event.requiresDetailSnapshotRefresh {
                             await load(showLoading: false)
@@ -271,30 +278,37 @@ struct DownloadDetailView: View {
 }
 
 private struct DownloadDetailLinkActions: View {
-    let taskURL: URL
+    let taskURL: URL?
+    let showInfo: () -> Void
 
     var body: some View {
         ControlGroup {
-            Link(destination: taskURL) {
-                Image(systemName: "music.note")
-                    .frame(width: 24.5)
-                    .foregroundStyle(.red)
+            if let taskURL {
+                Link(destination: taskURL) {
+                    Image(systemName: "music.note")
+                        .frame(width: 24.5)
+                        .foregroundStyle(.red)
+                }
+                .accessibilityLabel("在 Apple Music 中打开")
             }
-            .accessibilityLabel("在 Apple Music 中打开")
 
             Menu {
-                Button(action: copyTaskLink) {
-                    Label("复制链接", systemImage: "doc.on.doc")
+                if let taskURL {
+                    Button {
+                        UIPasteboard.general.string = taskURL.absoluteString
+                    } label: {
+                        Label("复制链接", systemImage: "doc.on.doc")
+                    }
+                }
+
+                Button(action: showInfo) {
+                    Label("详细信息", systemImage: "info.circle")
                 }
             } label: {
                 Image(systemName: "ellipsis")
             }
             .accessibilityLabel("更多")
         }
-    }
-
-    private func copyTaskLink() {
-        UIPasteboard.general.string = taskURL.absoluteString
     }
 }
 

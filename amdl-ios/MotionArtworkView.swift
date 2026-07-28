@@ -28,7 +28,8 @@ struct MotionArtworkView: View {
 }
 
 /// 循环播放一段动态封面 HLS。方形覆盖层和竖版出血头图共用这一个 —— 静音、
-/// 从不激活 AVAudioSession、遵守减弱动态效果 / 低电量 / 后台暂停。
+/// 不碰用户正在放的音乐（见 `Coordinator` 里那几处音频处理）、遵守减弱动态效果 /
+/// 低电量 / 后台暂停。
 struct MotionArtworkPlayer: View {
     let url: URL
     /// 首帧上屏前保持透明，避免黑底闪一下。方形模式下由调用方决定要不要淡入。
@@ -131,6 +132,7 @@ private struct MotionArtworkPlayerLayer: UIViewRepresentable {
 
         private var looper: AVPlayerLooper?
         private var itemObservation: NSKeyValueObservation?
+        private var trackObservation: NSKeyValueObservation?
         private var videoOutput: AVPlayerItemVideoOutput?
         private var displayLink: CADisplayLink?
         private var hasDeliveredFrame = false
@@ -138,14 +140,21 @@ private struct MotionArtworkPlayerLayer: UIViewRepresentable {
         /// 释放就会被输出的回收池收回复用，layer.contents 随即塌成空白——上滑到多
         /// 任务视图时封面"渐隐成纯色"就是这么来的。留住它，冻结帧才立得住。
         private var displayedBuffer: CVPixelBuffer?
+        private var loadTask: Task<Void, Never>?
+        private var audibleGroup: AVMediaSelectionGroup?
+        private var isPlaying = false
 
         init(onRenderingChange: @escaping (Bool) -> Void) {
             self.onRenderingChange = onRenderingChange
             player = AVQueuePlayer()
-            // 这些视频没有音轨（HLS variant 名里的 Anull），而且这里从不激活
-            // AVAudioSession —— 一旦激活就会打断用户正在放的音乐。静音是双保险。
             player.isMuted = true
             player.preventsDisplaySleepDuringVideoPlayback = false
+            // 动态封面是装饰，不该碰音频路由：允许外部播放会把 AirPlay 目标抢过来，
+            // 用户正在听的歌就断了。
+            player.allowsExternalPlayback = false
+            // 起播前会显式取消可听轨的选择（见 muteAudioTracks），别让播放器又按
+            // 系统偏好把它自动选回来。
+            player.appliesMediaSelectionCriteriaAutomatically = false
         }
 
         private var loadedURL: URL?
@@ -155,24 +164,80 @@ private struct MotionArtworkPlayerLayer: UIViewRepresentable {
             loadedURL = url
             hasDeliveredFrame = false
             report(false)
+            stopPlayback()
 
-            itemObservation?.invalidate()
-            looper?.disableLooping()
+            let asset = AVURLAsset(url: url)
+            loadTask = Task { [weak self] in
+                // 起播前先问清楚这条 HLS 里有没有可听轨。宁可晚半秒出画面也要等
+                // 这个结果：只要有一帧音频被渲染，系统就会激活 AVAudioSession，
+                // 用户正在放的歌当场被暂停。
+                let audibleGroup = try? await asset.loadMediaSelectionGroup(for: .audible)
+                guard !Task.isCancelled, let self else { return }
+                self.beginLooping(asset: asset, audibleGroup: audibleGroup)
+            }
+        }
+
+        private func beginLooping(asset: AVURLAsset, audibleGroup: AVMediaSelectionGroup?) {
+            self.audibleGroup = audibleGroup
+
+            let templateItem = AVPlayerItem(asset: asset)
+            muteAudioTracks(of: templateItem)
             // AVPlayerLooper 负责无缝循环：它按模板不断续排队列项，比监听
             // AVPlayerItemDidPlayToEndTime 再 seek(.zero) 少一次可见的卡顿。
-            looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+            looper = AVPlayerLooper(player: player, templateItem: templateItem)
 
-            // 循环器会不断换 currentItem，视频输出必须跟着挂到新的那个上。
+            // 循环器会不断换 currentItem，视频输出和静音处理都必须跟着挂到新的
+            // 那个上——模板项上做的媒体选择不保证被队列里的副本继承。
             itemObservation = player.observe(\.currentItem, options: [.initial, .new]) { [weak self] player, _ in
                 let item = player.currentItem
                 Task { @MainActor [weak self] in
-                    self?.attachVideoOutput(to: item)
+                    guard let self, let item else { return }
+                    self.muteAudioTracks(of: item)
+                    self.attachVideoOutput(to: item)
+                }
+            }
+
+            // KVO 的回调要绕一拍 MainActor 才到，起播可能赶在它前面。当前项这会儿
+            // 通常已经排上了，先就着它同步摘一遍，别让第一帧声音漏出去。
+            if let currentItem = player.currentItem {
+                muteAudioTracks(of: currentItem)
+            }
+
+            startPlaybackIfNeeded()
+        }
+
+        /// 把这一项的声音彻底摘掉，两道都要：HLS 只能靠取消可听轨的媒体选择来关
+        /// 音频；万一这条流没有可听分组（音频混在唯一的 variant 里），就等 tracks
+        /// 就绪后把音频轨直接禁用。`isMuted` 只是把音量拧到零，会话照样会被激活。
+        private func muteAudioTracks(of item: AVPlayerItem) {
+            if let audibleGroup {
+                item.select(nil, in: audibleGroup)
+            }
+            trackObservation?.invalidate()
+            trackObservation = item.observe(\.tracks, options: [.initial, .new]) { item, _ in
+                Task { @MainActor in
+                    for track in item.tracks where track.assetTrack?.mediaType == .audio {
+                        track.isEnabled = false
+                    }
                 }
             }
         }
 
-        private func attachVideoOutput(to item: AVPlayerItem?) {
-            guard let item else { return }
+        /// App 默认的 `.soloAmbient` 一旦被激活就会打断别的 App 的声音。动态封面
+        /// 自己没有任何要发出的声音，把会话降到 `.ambient`（天生与其他 App 混音、
+        /// 跟随静音键）就永远抢不走音频。识曲正在占着麦克风时不要动它，那边结束
+        /// 后会自己收回去。
+        private static func preferAmbientAudioSession() {
+            let session = AVAudioSession.sharedInstance()
+            switch session.category {
+            case .ambient, .record, .playAndRecord:
+                return
+            default:
+                try? session.setCategory(.ambient)
+            }
+        }
+
+        private func attachVideoOutput(to item: AVPlayerItem) {
             // IOSurface 属性是关键：拿到的 pixel buffer 才能直接当 layer.contents，
             // 省掉每帧一次 CIImage→CGImage 的软件转换。
             // IOSurface 属性写成空字典即可（要的就是"启用 IOSurface 支持"）。
@@ -188,14 +253,22 @@ private struct MotionArtworkPlayerLayer: UIViewRepresentable {
         }
 
         func setPlaying(_ isPlaying: Bool) {
+            self.isPlaying = isPlaying
             if isPlaying {
-                player.play()
-                startDisplayLink()
+                // 队列可能还没排上（资源仍在异步加载），起播交给 beginLooping。
+                startPlaybackIfNeeded()
             } else {
                 // 停掉取帧即可：最后一帧留在 layer.contents 上，就是冻结帧。
                 stopDisplayLink()
                 player.pause()
             }
+        }
+
+        private func startPlaybackIfNeeded() {
+            guard isPlaying, looper != nil else { return }
+            Self.preferAmbientAudioSession()
+            player.play()
+            startDisplayLink()
         }
 
         private func startDisplayLink() {
@@ -230,11 +303,22 @@ private struct MotionArtworkPlayerLayer: UIViewRepresentable {
         }
 
         func tearDown() {
+            stopPlayback()
+            displayedBuffer = nil
+        }
+
+        /// 拆掉当前这条流的播放管线，但留着 `displayedBuffer`：换 URL 时旧的那帧
+        /// 继续挂在 layer 上，新的首帧到位前不会闪一下空白。
+        private func stopPlayback() {
+            loadTask?.cancel()
+            loadTask = nil
             stopDisplayLink()
             itemObservation?.invalidate()
             itemObservation = nil
+            trackObservation?.invalidate()
+            trackObservation = nil
             videoOutput = nil
-            displayedBuffer = nil
+            audibleGroup = nil
             looper?.disableLooping()
             looper = nil
             player.removeAllItems()

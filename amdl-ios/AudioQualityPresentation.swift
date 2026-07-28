@@ -99,18 +99,26 @@ enum AudioQualityPresentation {
         normalizedCodec(item.codec) != nil || hasTechnicalValues(item)
     }
 
-    static func details(for items: [JobItem], title: String = "音质详情") -> Details {
+    /// 音质四项的结构化形式，`nil` 表示这项还没有数据。徽标弹窗和「详细信息」表
+    /// 共用同一份取值与格式，两处的写法不会漂移。
+    static func fields(for items: [JobItem]) -> [(label: String, value: String?)] {
         let codecs = distinct(items.compactMap { normalizedCodec($0.codec) })
         let bitDepths = distinct(items.compactMap { positive($0.bitDepth) }).map { "\($0) 位" }
         let sampleRates = distinct(items.compactMap { positive($0.sampleRate) }).map(sampleRateText)
         let bitrates = distinct(items.compactMap { positive($0.bitrate) }).map(bitrateText)
 
-        let message = [
-            "编码：\(joinedOrUnavailable(codecs))",
-            "位深度：\(joinedOrUnavailable(bitDepths))",
-            "采样率：\(joinedOrUnavailable(sampleRates))",
-            "码率：\(joinedOrUnavailable(bitrates))"
-        ].joined(separator: "\n")
+        return [
+            ("编码", joined(codecs)),
+            ("位深度", joined(bitDepths)),
+            ("采样率", joined(sampleRates)),
+            ("码率", joined(bitrates))
+        ]
+    }
+
+    static func details(for items: [JobItem], title: String = "音质详情") -> Details {
+        let message = fields(for: items)
+            .map { "\($0.label)：\($0.value ?? "暂无数据")" }
+            .joined(separator: "\n")
 
         return Details(title: title, message: message)
     }
@@ -148,8 +156,8 @@ enum AudioQualityPresentation {
         Array(Set(values)).sorted()
     }
 
-    private static func joinedOrUnavailable(_ values: [String]) -> String {
-        values.isEmpty ? "暂无数据" : values.joined(separator: "、")
+    private static func joined(_ values: [String]) -> String? {
+        values.isEmpty ? nil : values.joined(separator: "、")
     }
 
     private static func sampleRateText(_ value: Int) -> String {
