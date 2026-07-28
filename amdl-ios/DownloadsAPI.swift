@@ -914,7 +914,6 @@ enum DownloadsAPIError: LocalizedError {
 }
 
 enum DownloadsAPI {
-    private static let baseURLKey = "backendBaseURL"
     /// 生产部署的门户地址（`amdl-portal`）。
     ///
     /// 旧值是 `backend-dev-amdl.lyjw131.com`，那是 oauth2-proxy 直接挡在
@@ -924,28 +923,16 @@ enum DownloadsAPI {
     ///
     /// 所有 /api 请求都要带门户签发的 Bearer 令牌，见 `PortalAuth.swift`。
     /// 仍然可以在「配置 → 调试」里改成别的地址。
-    static let defaultBaseURLString = "https://amdl.lyjw131.com"
-    static let appGroupIdentifier = "group.com.lyjw131.amdl.amdl-ios"
-    private static let sharedDefaults = UserDefaults(suiteName: appGroupIdentifier)
+    ///
+    /// 具体的值和存取都在 `BackendEndpoint` 里 —— 门户是唯一的源站，所以全 App
+    /// 只有那一个可配置的主机地址，这里只是它在下载 API 这一侧的名字。
+    static let defaultBaseURLString = BackendEndpoint.defaultBaseURLString
+    static let appGroupIdentifier = BackendEndpoint.appGroupIdentifier
 
-    /// 后端根地址，可在「配置」页修改；主 App 和分享扩展共用这个值。
+    /// 后端根地址，可在「配置」页修改；主 App、分享扩展和实时活动网关共用这个值。
     static var baseURLString: String {
-        get {
-            if let shared = sharedDefaults?.string(forKey: baseURLKey), !shared.isEmpty {
-                return shared
-            }
-            // 早期版本把地址存在 standard defaults 里，这里搬进 App Group 让
-            // 分享扩展也能读到。不再改写具体地址：内置默认值已移除，用户填什么用什么。
-            if let legacy = UserDefaults.standard.string(forKey: baseURLKey), !legacy.isEmpty {
-                sharedDefaults?.set(legacy, forKey: baseURLKey)
-                return legacy
-            }
-            return defaultBaseURLString
-        }
-        set {
-            sharedDefaults?.set(newValue, forKey: baseURLKey)
-            UserDefaults.standard.set(newValue, forKey: baseURLKey)
-        }
+        get { BackendEndpoint.baseURLString }
+        set { BackendEndpoint.baseURLString = newValue }
     }
 
     private static let decoder: JSONDecoder = {

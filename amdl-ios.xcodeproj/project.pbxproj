@@ -341,6 +341,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
+				2E6E64032FF8AB6C005A8B28 /* LiveActivityShared */,
 				2E6E65012FF8AB6C005A8B28 /* ShareDownloadExtension */,
 			);
 			name = ShareDownloadExtension;

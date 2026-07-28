@@ -16,6 +16,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // 必须在任何人读网关地址之前跑：旧版本把它单独存在 standard defaults 里，
+        // 现在它由门户地址派生。晚一步 `DownloadLiveActivityManager.start()` 就会
+        // 拿着未迁移的地址去注册 token。
+        BackendEndpoint.migrateLegacyGatewayBaseURL()
+
         UNUserNotificationCenter.current().delegate = self
 
         Task { @MainActor in

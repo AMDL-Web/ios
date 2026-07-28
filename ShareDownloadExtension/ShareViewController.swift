@@ -6,13 +6,6 @@ import UniformTypeIdentifiers
 /// 这里刻意不显示任务详情（封面 / 音轨数 / 进度）。分享面板是个一闪而过的浮层，
 /// 轮询进度既要一直占着扩展进程，看到的也不如主 App 和实时活动全。
 final class ShareViewController: UIViewController {
-    /// 同主 App：不内置具体地址。用户没在主 App 里填过后端地址时，分享扩展会
-    /// 走下面的 `guard` 分支提示去配置，而不是打到一个写死的地址上。
-    /// 与 `DownloadsAPI.defaultBaseURLString` 保持一致；主 App 改过地址时，
-    /// App Group 里存的值优先。
-    private static let defaultBackendBaseURL = "https://amdl.lyjw131.com"
-    private static let backendBaseURLKey = "backendBaseURL"
-    private static let appGroupIdentifier = "group.com.lyjw131.amdl.amdl-ios"
     /// 主 App 的 URL scheme，见 `amdl-ios/Info.plist` 的 CFBundleURLTypes 和
     /// `ContentView.handleOpenURL`：带 job id 直接落到任务详情，不带就停在下载页。
     private static let appURLScheme = "amdl"
@@ -254,8 +247,10 @@ final class ShareViewController: UIViewController {
     /// identity token，10 分钟就废，明文放着风险有限；现在存的是门户会话，
     /// refresh token 有 60 天寿命，不该躺在会进备份的明文 plist 里。
     ///
-    /// 扩展和主 App 没有共享源码目录，所以这里是 `PortalCredentialStore` 的一份
-    /// 手抄，**四个常量必须和它逐字一致**（service / account / access group）。
+    /// `PortalCredentialStore` 在主 App target 里，扩展够不着（共享的只有
+    /// `LiveActivityShared/`），所以这里是它的一份手抄，**四个常量必须和它逐字
+    /// 一致**（service / account / access group）。access group 已经改成引用
+    /// `BackendEndpoint.appGroupIdentifier`，剩下三个还是字面量。
     /// access group 用的是 App Group id——iOS 允许这么用，所以扩展读得到，而且
     /// 不需要新增任何 entitlement。
     ///
@@ -266,7 +261,7 @@ final class ShareViewController: UIViewController {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "com.lyjw131.amdl.portal",
             kSecAttrAccount as String: "session",
-            kSecAttrAccessGroup as String: appGroupIdentifier,
+            kSecAttrAccessGroup as String: BackendEndpoint.appGroupIdentifier,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
@@ -289,10 +284,11 @@ final class ShareViewController: UIViewController {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
+    /// 门户地址从 `BackendEndpoint` 取，和主 App 是同一份代码、同一个 App Group
+    /// 键。以前这里自己抄了一份默认地址和键名，主 App 改了地址而这边没跟上时，
+    /// 分享面板会一直往旧域名提交。
     private func backendBaseURL() throws -> URL {
-        let configuredBaseURL = UserDefaults(suiteName: Self.appGroupIdentifier)?
-            .string(forKey: Self.backendBaseURLKey)
-        let candidate = configuredBaseURL ?? Self.defaultBackendBaseURL
+        let candidate = BackendEndpoint.baseURLString
         guard !candidate.isEmpty, let baseURL = URL(string: candidate) else {
             throw ShareSubmissionError.invalidBackendURL
         }

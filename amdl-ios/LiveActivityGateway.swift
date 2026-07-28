@@ -21,24 +21,21 @@ enum LiveActivityGatewayError: LocalizedError {
 }
 
 enum LiveActivityGatewayAPI {
-    /// 同 `DownloadsAPI.defaultBaseURLString`，走同一个域名，只是那一端把 `/apns`
-    /// 前缀剥掉后转给 APNs 推送后端（`amdl-ios-gateway`），所以这里必须带上该前缀。
+    /// 门户地址加上 `/apns`。门户把这个前缀剥掉之后才转给 APNs 推送后端
+    /// （`amdl-ios-gateway`），所以这里必须带上它。
     ///
     /// 剥前缀的活儿从 Traefik 搬到了门户：以前是 `amdl-apns-strip` 这个 stripPrefix
     /// 中间件，现在是门户策略表里的 `/apns/*` 那几行。对 App 来说地址形状没变，
     /// **但那个 router 已经不存在了**——`amdl-ios-gateway` 现在只在内网，不经过门户
     /// 就没有任何路径能注册设备令牌，实时活动会静悄悄地再也不出现。
-    static let defaultBaseURLString = "https://amdl.lyjw131.com/apns"
-    private static let baseURLKey = "liveActivityGatewayBaseURL"
+    ///
+    /// 正因为它只可能和门户同源，网关地址**不再是一个独立的设置项**：它从
+    /// `BackendEndpoint.baseURLString` 派生。以前两个输入框各存各的，改了后端地址
+    /// 却忘了改网关，症状就是进度条无声无息地消失。
+    static var defaultBaseURLString: String { BackendEndpoint.defaultGatewayBaseURLString }
     private static let deviceIDKey = "liveActivityGatewayDeviceID"
 
-    static var baseURLString: String {
-        get {
-            // 不再改写用户存下的地址：内置默认值已移除，填什么用什么。
-            UserDefaults.standard.string(forKey: baseURLKey) ?? defaultBaseURLString
-        }
-        set { UserDefaults.standard.set(newValue, forKey: baseURLKey) }
-    }
+    static var baseURLString: String { BackendEndpoint.gatewayBaseURLString }
 
     static var deviceID: String {
         if let existing = UserDefaults.standard.string(forKey: deviceIDKey), !existing.isEmpty {
@@ -85,7 +82,9 @@ enum LiveActivityGatewayAPI {
     /// 网关地址可以带路径前缀（反向代理下是 `https://<域名>/apns`），所以端点路径
     /// 要**追加**在它后面。早先这里直接 `components.path = path`，会把前缀整个
     ///覆盖掉，请求打到 `/v1/devices/...` 而不是 `/apns/v1/devices/...`。
-    private static func makeURL(path: String) -> URL? {
+    /// 非 private 是为了让测试能钉住"前缀 + 端点"的拼接结果——这条链路一旦拼错，
+    /// 表现是实时活动不出现，App 侧一句错都不报。
+    static func makeURL(path: String) -> URL? {
         guard !baseURLString.isEmpty, var components = URLComponents(string: baseURLString) else {
             return nil
         }

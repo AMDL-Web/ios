@@ -844,26 +844,149 @@ struct amdl_iosTests {
 @MainActor
 struct PortalAuthTests {
 
-    /// 三个默认地址必须一起指向门户。
+    /// 三条链路只剩一个可配置的地址。
     ///
-    /// 它们分头写在三个文件里（主 App、实时活动网关、分享扩展），历史上就是靠人
-    /// 记得同步——而漏掉任何一个的后果都不一样地难查：主 App 打错域名会立刻报错，
+    /// 以前默认地址分头写在三个文件里（主 App、实时活动网关、分享扩展），靠人记得
+    /// 同步——而漏掉任何一个的后果都不一样地难查：主 App 打错域名会立刻报错，
     /// 但**实时活动网关打错只会静悄悄地再也不出现进度条**，App 那边一句错都不报。
+    /// 现在它们都从 `BackendEndpoint` 派生，这个测试钉住那层派生关系。
     @Test func defaultEndpointsPointAtThePortal() {
-        #expect(DownloadsAPI.defaultBaseURLString == "https://amdl.lyjw131.com")
+        #expect(BackendEndpoint.defaultBaseURLString == "https://amdl.lyjw131.com")
+        #expect(DownloadsAPI.defaultBaseURLString == BackendEndpoint.defaultBaseURLString)
         // 必须保留 /apns 后缀：门户把这个前缀剥掉之后才转给 amdl-ios-gateway，
         // 那台机器只认识 /v1/... 和 /health。
         #expect(LiveActivityGatewayAPI.defaultBaseURLString == "https://amdl.lyjw131.com/apns")
         #expect(LiveActivityGatewayAPI.defaultBaseURLString.hasPrefix(DownloadsAPI.defaultBaseURLString))
+        // 网关地址就是当前门户地址加前缀，没有第二个存储位置可以和它不一致。
+        #expect(LiveActivityGatewayAPI.baseURLString == BackendEndpoint.gatewayBaseURLString)
+        #expect(LiveActivityGatewayAPI.baseURLString
+            == BackendEndpoint.apnsURLString(from: DownloadsAPI.baseURLString))
+    }
+
+    /// 改一个设置，三条链路一起跟着走。
+    ///
+    /// 这是「一个域名」的全部意义：`/api/v1`（下载）、`/apns`（实时活动）和分享
+    /// 扩展读的地址来自同一个 App Group 键。分享扩展是独立二进制，测不进来，但它
+    /// 走的是同一份 `BackendEndpoint.baseURLString`（`LiveActivityShared/` 现在也
+    /// 编进了那个 target），所以钉住这里就等于钉住了它。
+    @Test func oneStoredValueDrivesEveryEndpoint() {
+        // 全程走纯函数。**不要往真实 defaults 里写**：用例是并行跑的，塞一个假地址
+        // 进去会让同批次里读地址的 `bearerGoesOnlyToThePortalHost` 跟着崩 ——
+        // 这个坑在做这次改动时踩过一次。
+        let resolve = BackendEndpoint.resolveBaseURLString
+
+        // 没存过值就是内置默认。
+        #expect(resolve(nil, nil) == BackendEndpoint.defaultBaseURLString)
+        #expect(resolve("", "") == BackendEndpoint.defaultBaseURLString)
+
+        // App Group 里的值优先。分享扩展是独立二进制、测不进来，但它读的就是这一份
+        // 代码（`LiveActivityShared/` 现在也编进了那个 target），所以钉住这里等于
+        // 钉住了分享扩展。
+        #expect(resolve("https://portal.test", nil) == "https://portal.test")
+        #expect(resolve("https://portal.test", "https://legacy.test") == "https://portal.test")
+
+        // 更早的版本把地址存在 standard defaults 里，仍然要认。
+        #expect(resolve(nil, "https://legacy.test") == "https://legacy.test")
+        #expect(resolve("", "https://legacy.test") == "https://legacy.test")
+
+        // 三条链路都从这一个值派生。
+        let base = resolve("https://portal.test", nil)
+        #expect(BackendEndpoint.apnsURLString(from: base) == "https://portal.test/apns")
+    }
+
+    /// 三个调用点读的是同一个值，而且 `/apns` 端点拼在前缀**后面**。
+    ///
+    /// 这里只读不写，所以设备上当前存着什么地址都成立。端点路径要是覆盖掉前缀
+    /// （早先就出过这个 bug），请求会打到 `/v1/...` 而不是 `/apns/v1/...`，
+    /// 门户直接 404，而 App 侧一句错都不报。
+    @Test func everyCallSiteReadsTheOneSetting() {
+        let base = BackendEndpoint.baseURLString
+        let gateway = BackendEndpoint.apnsURLString(from: base)
+
+        #expect(DownloadsAPI.baseURLString == base)
+        #expect(LiveActivityGatewayAPI.baseURLString == gateway)
+        #expect(gateway.hasSuffix("/apns"))
+        #expect(LiveActivityGatewayAPI.makeURL(path: "/v1/devices/abc/push-token")?.absoluteString
+            == gateway + "/v1/devices/abc/push-token")
+        #expect(LiveActivityGatewayAPI.makeURL(path: "/health")?.absoluteString
+            == gateway + "/health")
+    }
+
+    /// `/apns` 只加一次，且不受结尾斜杠影响。用户把带前缀的旧地址粘进那个唯一的
+    /// 输入框是很可能发生的事，叠成 `/apns/apns` 的话门户会 404。
+    @Test func apnsPrefixIsDerivedNotDoubled() {
+        #expect(BackendEndpoint.apnsURLString(from: "https://h.example") == "https://h.example/apns")
+        #expect(BackendEndpoint.apnsURLString(from: "https://h.example/") == "https://h.example/apns")
+        #expect(BackendEndpoint.apnsURLString(from: "https://h.example/apns") == "https://h.example/apns")
+        #expect(BackendEndpoint.apnsURLString(from: "https://h.example/apns/") == "https://h.example/apns")
+        #expect(BackendEndpoint.apnsURLString(from: "") == "")
+
+        #expect(BackendEndpoint.portalURLString(fromGateway: "https://h.example/apns") == "https://h.example")
+        #expect(BackendEndpoint.portalURLString(fromGateway: "https://h.example") == "https://h.example")
+    }
+
+    /// 旧版本存下来的独立网关地址怎么并进唯一设置。
+    ///
+    /// 关键约束是**不能悄悄改掉 `backendBaseURL`**：它管着 /api/v1 和 /api/gw，
+    /// 也就是 App 的全部功能。拿网关地址去覆盖它，会把一套本来能用的配置改坏。
+    @Test func legacyGatewayURLMigration() {
+        typealias Migration = BackendEndpoint.GatewayMigration
+
+        // 从没存过旧值：绝大多数用户走这条路。
+        #expect(BackendEndpoint.gatewayMigration(legacyGateway: nil, storedPortal: nil) == .nothingToDo)
+        #expect(BackendEndpoint.gatewayMigration(legacyGateway: "", storedPortal: nil) == .nothingToDo)
+
+        // 两边本来就一致（含只差一个结尾斜杠 / 大小写的情形）：直接删键，无感。
+        #expect(BackendEndpoint.gatewayMigration(
+            legacyGateway: "https://amdl.lyjw131.com/apns", storedPortal: nil
+        ) == .droppedRedundantValue)
+        #expect(BackendEndpoint.gatewayMigration(
+            legacyGateway: "https://amdl.lyjw131.com/apns/", storedPortal: "https://amdl.lyjw131.com/"
+        ) == .droppedRedundantValue)
+
+        // 只改过网关、而且旧值是门户形状（带 /apns）：那台主机才是用户指定的，
+        // 把 origin 提上来当唯一设置，而不是把他默默退回生产域名。
+        #expect(BackendEndpoint.gatewayMigration(
+            legacyGateway: "https://staging.example/apns", storedPortal: nil
+        ) == .adoptedPortalOrigin("https://staging.example"))
+
+        // 旧值不带 /apns（典型是本地直连网关的调试配置）：它不是门户，不能拿来
+        // 当门户地址，只能丢弃并告知。
+        #expect(BackendEndpoint.gatewayMigration(
+            legacyGateway: "http://192.168.1.5:18081", storedPortal: nil
+        ) == .discarded("http://192.168.1.5:18081"))
+
+        // 两个都改过、指向不同主机：一个源站表达不了两个 origin。保留门户地址，
+        // 把丢掉的那个记下来让「调试」页明说。
+        #expect(BackendEndpoint.gatewayMigration(
+            legacyGateway: "http://192.168.1.5:18081", storedPortal: "http://192.168.1.5:18080"
+        ) == .discarded("http://192.168.1.5:18081"))
+        // 同一台主机、门户形状，但门户地址已被改到别处：同样不许覆盖它。
+        #expect(BackendEndpoint.gatewayMigration(
+            legacyGateway: "https://old.example/apns", storedPortal: "https://new.example"
+        ) == .discarded("https://old.example/apns"))
+
+        // 迁移结果是 Equatable 的判别式，UI 靠它决定要不要提示。
+        let discarded: Migration = .discarded("https://old.example/apns")
+        #expect(discarded != .droppedRedundantValue)
     }
 
     /// 令牌只发给门户域名。封面可能来自 Apple CDN 或对象存储，把会话令牌发给
     /// 第三方既没必要也不安全。
-    @Test func bearerGoesOnlyToThePortalHost() {
-        #expect(AppleAuthCredentialStore.isGatewayHost("amdl.lyjw131.com"))
-        #expect(AppleAuthCredentialStore.isGatewayHost("AMDL.LYJW131.COM"))
+    ///
+    /// host 从**当前配置的**门户地址算出来，不写死生产域名：设备上完全可能配着
+    /// 本地后端。以前这里写死 `amdl.lyjw131.com` 也能过，靠的是网关那份独立的默认
+    /// 地址——后端改成 127.0.0.1 之后它仍然是生产域名，于是"生产域名被信任"这条
+    /// 断言恰好成立。那正是这次要消掉的分叉，所以断言改成钉住策略本身：**只信任
+    /// 配置里的那一个 host，且必须精确匹配**。
+    @Test func bearerGoesOnlyToThePortalHost() throws {
+        let host = try #require(URLComponents(string: DownloadsAPI.baseURLString)?.host)
+        #expect(AppleAuthCredentialStore.isGatewayHost(host))
+        #expect(AppleAuthCredentialStore.isGatewayHost(host.uppercased()))
+        // 网关走同一个 host，所以派生出来的地址不会引入第二个受信任域名。
+        #expect(URLComponents(string: LiveActivityGatewayAPI.baseURLString)?.host == host)
         #expect(!AppleAuthCredentialStore.isGatewayHost("is5-ssl.mzstatic.com"))
-        #expect(!AppleAuthCredentialStore.isGatewayHost("amdl.lyjw131.com.evil.example"))
+        #expect(!AppleAuthCredentialStore.isGatewayHost("\(host).evil.example"))
         #expect(!AppleAuthCredentialStore.isGatewayHost(nil))
         #expect(!AppleAuthCredentialStore.isGatewayHost(""))
     }
@@ -925,7 +1048,8 @@ struct PortalAuthTests {
         #expect(fresh.isAccessTokenUsable)
     }
 
-    /// 凭据的编码形状是**跨 target 的契约**：分享扩展没有共享源码目录，它自己手抄
+    /// 凭据的编码形状是**跨 target 的契约**：`PortalCredentialStore` 在主 App
+    /// target 里，分享扩展够不着（共享的只有 `LiveActivityShared/`），它自己手抄
     /// 了一份解码器，只认 `accessToken` 这个键。改字段名会让分享面板静默地不带令牌。
     @Test func storedCredentialsKeepTheKeyNamesTheExtensionReads() throws {
         let encoded = try JSONEncoder().encode(PortalCredentials(

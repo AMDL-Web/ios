@@ -12,7 +12,8 @@ import MusicKit
 /// 从「配置」页的「调试」入口进入，不再单独占用底部标签。
 struct DebugView: View {
     @State private var backendBaseURL = DownloadsAPI.baseURLString
-    @AppStorage("liveActivityGatewayBaseURL") private var liveActivityGatewayBaseURL = LiveActivityGatewayAPI.defaultBaseURLString
+    /// 升级到「一个域名」时被丢弃的旧网关地址。见 `BackendEndpoint.GatewayMigration`。
+    @State private var discardedGatewayBaseURL = BackendEndpoint.discardedGatewayBaseURL
     @State private var authorizationStatus = MusicAuthorization.currentStatus
     @State private var developerToken = ""
     @State private var musicUserToken = ""
@@ -39,27 +40,36 @@ struct DebugView: View {
     var body: some View {
         Form {
             Section {
-                TextField("http://localhost:18080", text: $backendBaseURL)
+                TextField(BackendEndpoint.defaultBaseURLString, text: $backendBaseURL)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .font(.body.monospaced())
-            } header: {
-                Text("后端")
-            } footer: {
-                Text("下载页从这个地址读取任务列表。")
-            }
 
-            Section {
-                TextField("http://localhost:18081", text: $liveActivityGatewayBaseURL)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
+                LabeledContent("实时活动网关") {
+                    Text(BackendEndpoint.apnsURLString(from: backendBaseURL))
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+
+                if let discardedGatewayBaseURL {
+                    // 只有从旧版本升上来、而且两个地址当初指向不同主机的用户会看到
+                    // 这一段。实时活动的目标主机变了却不吭声，是这次要避免的事。
+                    Label {
+                        Text("旧版本里实时活动网关另填过 \(discardedGatewayBaseURL)。现在网关地址由上面这一个地址派生，那份设置已经不再使用。")
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle")
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+
+                    Button("知道了", action: dismissGatewayMigrationNotice)
+                }
             } header: {
-                Text("实时活动网关")
+                Text("门户")
             } footer: {
-                Text("网关订阅后端任务事件流，并通过 APNs 把下载进度和状态推送到灵动岛。修改地址后请重新启动 App，以向新网关注册实时活动 token。")
+                Text("整个 App 只有这一个地址：任务列表走 /api/v1，账号和配额走 /api/gw，实时活动走 /apns，都由它派生。修改后请重新启动 App，以向新地址注册实时活动 token。")
             }
 
             Section {
@@ -187,6 +197,11 @@ struct DebugView: View {
 
     private func backendBaseURLChanged(_ oldValue: String, _ newValue: String) {
         DownloadsAPI.baseURLString = newValue
+    }
+
+    private func dismissGatewayMigrationNotice() {
+        BackendEndpoint.clearDiscardedGatewayBaseURL()
+        discardedGatewayBaseURL = nil
     }
 
     private func requestAppleMusicAuthorization() async {
