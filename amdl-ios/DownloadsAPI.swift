@@ -899,7 +899,12 @@ struct DownloadSubmitResult: Decodable {
 enum DownloadsAPIError: LocalizedError {
     case invalidBaseURL
     case invalidResponse
-    case server(status: Int, message: String?)
+    /// `code` 是错误体里那个机器可读的值（`/api/v1/*` 放在 `error` 字段，
+    /// `/api/gw/*` 放在 `code` 字段）。**不要直接拿它当文案** —— 它可能是
+    /// `pending_approval` 这种码，也可能是 `sql: no rows in result set` 这种
+    /// 后端漏出来的原始 SQL 错误。它存在是为了让调用方能按码分支，
+    /// 见 `JobActionError.mapping`。
+    case server(status: Int, code: String?, message: String?)
 
     var errorDescription: String? {
         switch self {
@@ -907,7 +912,7 @@ enum DownloadsAPIError: LocalizedError {
             "后端地址无效，请到「配置」页检查"
         case .invalidResponse:
             "服务器返回了无法解析的数据"
-        case let .server(status, message):
+        case let .server(status, _, message):
             message ?? "服务器错误 (\(status))"
         }
     }
@@ -996,6 +1001,40 @@ enum DownloadsAPI {
             return result
         }
         throw serverError(status: httpResponse.statusCode, data: data)
+    }
+
+    /// `POST /api/v1/downloads/{id}/cancel` → 200 `{"status":"cancelled"}`。
+    ///
+    /// 对终态任务同样答 200 且什么都不做，所以这里不会因为「任务刚好跑完了」而报错。
+    /// 唯一的意外是任务不存在：后端那个 handler 把所有错误都写成 500
+    /// （`server.go:608-614`），由 `JobActionError.mapping` 兜住。
+    static func cancelDownload(id: String) async throws {
+        try await act(id: id, path: "/cancel", method: "POST", expecting: 200)
+    }
+
+    /// `POST /api/v1/downloads/{id}/retry` → 202 `{"status":"queued"}`。
+    ///
+    /// **只收 failed 的任务**，其余一律 409（含 cancelled）。响应体里没有任务对象，
+    /// 任务 id 不变，新状态靠事件流或重新拉快照。
+    static func retryDownload(id: String) async throws {
+        try await act(id: id, path: "/retry", method: "POST", expecting: 202)
+    }
+
+    /// `DELETE /api/v1/downloads/{id}` → 200 `{"status":"deleted"}`。终态任务才行。
+    static func deleteDownload(id: String) async throws {
+        try await act(id: id, path: "", method: "DELETE", expecting: 200)
+    }
+
+    private static func act(id: String, path: String, method: String, expecting: Int) async throws {
+        let encodedID = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let url = try makeURL(path: "/api/v1/downloads/\(encodedID)\(path)")
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+
+        let (data, httpResponse) = try await PortalHTTP.send(request)
+        guard httpResponse.statusCode == expecting else {
+            throw serverError(status: httpResponse.statusCode, data: data)
+        }
     }
 
     static func decodeDownloadDetail(from data: Data) throws -> DownloadDetail {
@@ -1095,6 +1134,10 @@ enum DownloadsAPI {
         if let mapped = body?.authError(status: status) {
             return mapped
         }
-        return DownloadsAPIError.server(status: status, message: body?.resolvedMessage)
+        return DownloadsAPIError.server(
+            status: status,
+            code: body?.resolvedCode,
+            message: body?.resolvedMessage
+        )
     }
 }

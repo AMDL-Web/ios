@@ -33,6 +33,7 @@ struct DownloadView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var lastEventID: Int64 = 0
+    @State private var actionRunner = JobActionRunner()
 
     private var activeJobs: [Job] {
         jobs.filter { $0.status == .queued || $0.status == .running }
@@ -88,9 +89,35 @@ struct DownloadView: View {
                 DownloadDetailDestination(
                     jobID: jobID,
                     initialJob: jobs.first { $0.id == jobID },
-                    artworkNavigationNamespace: artworkNavigationNamespace
+                    artworkNavigationNamespace: artworkNavigationNamespace,
+                    onRestarted: { newJobID in navigationPath = [newJobID] }
                 )
             }
+            .jobActionPrompts(runner: actionRunner, onConfirmed: handle(outcome:))
+            .swAlert()
+        }
+    }
+
+    /// 动作成功之后总览列表要做的事。
+    ///
+    /// 取消和重新入队都**不**动本地的 `jobs`：总览 SSE 会推一条
+    /// `download_upserted` 带着新状态回来，本地再改一遍就是和事件流抢方向盘。
+    /// 用户不会盯着一行不动的列表 —— `actionRunner.inFlight` 让那一行在这期间
+    /// 显示「正在停止…」。
+    ///
+    /// 删除是例外：HTTP 200 已经证明这条没了，本地直接摘掉。随后那条
+    /// `download_deleted` 落到 `apply(_:)` 里也只是再 `removeAll` 一次，无害。
+    private func handle(outcome: JobActionOutcome) {
+        switch outcome {
+        case let .deleted(jobID):
+            jobs.removeAll { $0.id == jobID }
+        case let .restarted(newJobID):
+            SWAlertManager.shared.show(.success, message: "已重新提交为新任务")
+            if let newJobID {
+                navigationPath = [newJobID]
+            }
+        case .cancelling, .requeued:
+            break
         }
     }
 
@@ -102,11 +129,29 @@ struct DownloadView: View {
                     NavigationLink(value: job.id) {
                         DownloadJobRow(
                             job: job,
+                            inFlightAction: actionRunner.action(forJobID: job.id),
                             artworkNavigationNamespace: artworkNavigationNamespace
                         )
                     }
                     .task(id: "large-artwork|\(job.id)|\(job.artworkURL ?? "")") {
                         await prefetchLargeArtwork(startingAt: job.id)
+                    }
+                    // allowsFullSwipe: false —— 最外侧那个按钮是「删除」，而删除
+                    // 不可撤销且要先确认。让一次划到底就触发它，等于把确认框做成
+                    // 误触之后才弹的东西。
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        ForEach(job.status.trailingSwipeActions) { action in
+                            Button(role: action.isDestructive ? .destructive : nil) {
+                                Task {
+                                    if let outcome = await actionRunner.request(action, on: job) {
+                                        handle(outcome: outcome)
+                                    }
+                                }
+                            } label: {
+                                Label(action.title, systemImage: action.symbolName)
+                            }
+                            .tint(action.isDestructive ? .red : .accentColor)
+                        }
                     }
                 }
             }
@@ -212,6 +257,9 @@ struct DownloadView: View {
 
 private struct DownloadJobRow: View {
     let job: Job
+    /// 这一行上正在飞的动作。取消和重新开始的真实状态要等事件流回来，中间这段
+    /// 空窗如果什么都不显示，用户会以为侧滑没生效。
+    var inFlightAction: JobAction?
     let artworkNavigationNamespace: Namespace.ID
 
     var body: some View {
@@ -223,7 +271,7 @@ private struct DownloadJobRow: View {
                     .font(.body)
                     .lineLimit(1)
 
-                Text(job.statusText)
+                Text(inFlightAction?.inFlightTitle ?? job.statusText)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -281,6 +329,7 @@ private struct DownloadDetailDestination: View {
     let jobID: String
     let initialJob: Job?
     let artworkNavigationNamespace: Namespace.ID
+    let onRestarted: (String) -> Void
 
     private var usesZoomTransition: Bool {
         initialJob?.type.usesArtworkZoomTransition == true
@@ -290,7 +339,8 @@ private struct DownloadDetailDestination: View {
         DownloadDetailView(
             jobID: jobID,
             initialJob: initialJob,
-            usesZoomTransition: usesZoomTransition
+            usesZoomTransition: usesZoomTransition,
+            onRestarted: onRestarted
         )
         .id(jobID)
         .modifier(

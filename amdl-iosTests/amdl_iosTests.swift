@@ -1070,4 +1070,129 @@ struct PortalAuthTests {
         #expect(PortalCredentialStore.accessGroup == DownloadsAPI.appGroupIdentifier)
         #expect(PortalCredentialStore.accessGroup == "group.com.lyjw131.amdl.amdl-ios")
     }
+
+}
+
+/// 任务管理动作：状态 → 可用动作的推导，以及错误措辞。
+@MainActor
+struct JobActionTests {
+
+    /// 这张表钉的是**后端真实行为**，不是 openapi.yaml 上写的：每一格都在本机起的
+    /// amdl-backend 上打过一遍。跑偏了就会给用户一个必定 409 的按钮。
+    ///
+    /// 最要紧的是 cancelled 那行：`/retry` 只收 failed
+    /// （`internal/jobs/manager.go:455`），已取消的任务打过去是
+    /// 409 `only failed jobs can be retried`。所以那里给的是 `.restart`
+    /// ——重新提交成一个新任务——而不是 `.retry`。
+    @Test func availableActionsMirrorTheBackendRules() {
+        #expect(JobStatus.queued.availableActions == [.cancel])
+        #expect(JobStatus.running.availableActions == [.cancel])
+        #expect(JobStatus.completed.availableActions == [.delete])
+        #expect(JobStatus.failed.availableActions == [.retry, .delete])
+        #expect(JobStatus.cancelled.availableActions == [.restart, .delete])
+    }
+
+    /// 已取消的任务绝不能给 `.retry`。单独立一条，因为这正是「文档说 failed
+    /// only，但用户想要取消后也能重来」那个需求最容易被做错的地方。
+    @Test func cancelledJobsNeverOfferTheRetryEndpoint() {
+        #expect(!JobStatus.cancelled.availableActions.contains(.retry))
+        #expect(JobStatus.cancelled.availableActions.contains(.restart))
+    }
+
+    /// 删除只对终态任务开放（后端 `db.go` 对非终态答 409），
+    /// 停止只对活跃任务开放（终态任务后端答 200 但什么也不做）。
+    @Test func deleteIsTerminalOnlyAndCancelIsActiveOnly() {
+        for status in [JobStatus.queued, .running] {
+            #expect(!status.availableActions.contains(.delete), "\(status) 不该能删除")
+            #expect(status.availableActions.contains(.cancel), "\(status) 该能停止")
+        }
+        for status in [JobStatus.completed, .failed, .cancelled] {
+            #expect(status.availableActions.contains(.delete), "\(status) 该能删除")
+            #expect(!status.availableActions.contains(.cancel), "\(status) 不该能停止")
+        }
+    }
+
+    /// 侧滑和菜单读同一张表，只是顺序相反：`swipeActions(edge: .trailing)` 里
+    /// 先声明的排在最外侧，而删除要贴着右边缘。
+    @Test func swipeOrderIsTheMenuOrderReversed() {
+        for status in [JobStatus.queued, .running, .completed, .failed, .cancelled] {
+            #expect(
+                status.trailingSwipeActions == status.availableActions.reversed(),
+                "\(status) 的侧滑顺序应当是菜单顺序的反转"
+            )
+            #expect(
+                Set(status.trailingSwipeActions) == Set(status.availableActions),
+                "\(status) 两个入口给的动作集合必须一致"
+            )
+        }
+    }
+
+    /// 破坏性 = 要确认，只有删除一个。取消和重新开始不该拦一道。
+    @Test func onlyDeleteIsDestructiveAndConfirmed() {
+        for action in JobAction.allCases {
+            #expect(action.isDestructive == (action == .delete))
+            #expect(action.requiresConfirmation == action.isDestructive)
+        }
+    }
+
+    /// 配额和状态冲突都要说人话。
+    ///
+    /// 这不是锦上添花：`/api/v1/*` 的错误体是 `{"error": "..."}`，而
+    /// `PortalErrorBody.resolvedMessage` 读的是 `detail/message/title`——一个都没有，
+    /// 于是 `DownloadsAPIError.server` 的 `errorDescription` 每次都退化成
+    /// 「服务器错误 (409)」。不按状态码翻一遍，用户看到的就只有那句话。
+    @Test func actionErrorsGetHumanChineseWording() {
+        func mapped(_ status: Int, code: String? = nil, action: JobAction) -> String {
+            let error = DownloadsAPIError.server(status: status, code: code, message: nil)
+            return JobActionError.mapping(error, action: action).localizedDescription
+        }
+
+        // 未翻译时的样子，作为对照：这就是不该让用户看到的那句。
+        #expect(
+            DownloadsAPIError.server(status: 409, code: "only failed jobs can be retried", message: nil)
+                .localizedDescription == "服务器错误 (409)"
+        )
+
+        #expect(mapped(429, action: .retry).contains("额度"))
+        #expect(mapped(503, action: .retry).contains("排满"))
+        #expect(mapped(404, action: .delete).contains("已经不在了"))
+        #expect(mapped(409, action: .delete).contains("先「停止」再删除"))
+        #expect(mapped(409, action: .retry).contains("只有失败的任务"))
+
+        for action in JobAction.allCases {
+            for status in [404, 409, 429, 503] {
+                let message = mapped(status, action: action)
+                #expect(!message.contains("服务器错误"), "\(action)/\(status) 漏了措辞")
+                #expect(!message.isEmpty)
+            }
+        }
+    }
+
+    /// 后端的 `cancelDownload` 把**所有**错误都写成 500，包括「任务不存在」
+    /// （`internal/api/server.go:608-614`，delete 和 retry 那两个 handler 都好好
+    /// 映射成 404 了）。所以停止一个已经被删掉的任务会收到
+    /// 500 `{"error":"job not found"}`，得按错误码认出来。
+    @Test func cancelMapsTheBackendsFiveHundredForAMissingJob() {
+        let error = DownloadsAPIError.server(status: 500, code: "job not found", message: nil)
+        #expect(JobActionError.mapping(error, action: .cancel) as? JobActionError == .jobGone(.cancel))
+
+        // 别的动作、别的 500 一律不认——那些是真的服务器故障。
+        #expect(JobActionError.mapping(error, action: .delete) as? JobActionError == nil)
+        #expect(
+            JobActionError.mapping(
+                DownloadsAPIError.server(status: 500, code: "disk full", message: nil),
+                action: .cancel
+            ) as? JobActionError == nil
+        )
+    }
+
+    /// 认证类错误本来就有人话，不许被动作层的措辞盖掉。
+    @Test func authErrorsPassThroughTheActionMapper() throws {
+        let mapped = JobActionError.mapping(PortalAuthError.pendingApproval, action: .delete)
+        guard case PortalAuthError.pendingApproval = mapped else {
+            Issue.record("认证错误被动作层改写了：\(mapped)")
+            return
+        }
+        #expect(mapped.localizedDescription.contains("等待管理员批准"))
+    }
 }

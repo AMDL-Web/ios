@@ -17,7 +17,15 @@ struct DownloadDetailView: View {
     let jobID: String
     let initialJob: Job?
     var usesZoomTransition: Bool = false
+    /// 「重新开始」一个**已取消**的任务会得到一个新任务（新 id），这里把它交回给
+    /// 导航栈的持有者，好让详情页跟着跳到新任务上，而不是留在那条已取消的上面。
+    var onRestarted: ((String) -> Void)?
 
+    @Environment(\.dismiss) private var dismiss
+    @State private var actionRunner = JobActionRunner()
+    /// 累加它就会重跑 `runDetailLifecycle()`（重拉快照 + 重连事件流）。
+    /// 只有「终态任务被重新入队」需要它，原因见 `handle(outcome:)`。
+    @State private var lifecycleGeneration = 0
     @State private var barFade = DownloadNavBarFadeHandle()
     @State private var barItemsVisible = true
     @State private var detail: DownloadDetail?
@@ -118,10 +126,13 @@ struct DownloadDetailView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     // 「详细信息」不依赖链接可用，所以这里跟着任务本身出现；
                     // input 不是 http(s) 时只是少掉 Apple Music 入口和复制链接。
-                    if job != nil {
+                    if let job {
                         DownloadDetailLinkActions(
+                            job: job,
                             taskURL: appleMusicURL,
-                            showInfo: { isShowingInfo = true }
+                            runner: actionRunner,
+                            showInfo: { isShowingInfo = true },
+                            onOutcome: handle(outcome:)
                         )
                     }
                 }
@@ -135,7 +146,7 @@ struct DownloadDetailView: View {
             }
         }
         .onAppear(perform: configureNavigationBarFade)
-        .task(id: jobID) {
+        .task(id: "\(jobID)|\(lifecycleGeneration)") {
             await runDetailLifecycle()
         }
         .sheet(isPresented: $isShowingInfo) {
@@ -149,6 +160,36 @@ struct DownloadDetailView: View {
                 message: Text(details.message),
                 dismissButton: .default(Text("好"))
             )
+        }
+        .jobActionPrompts(runner: actionRunner, onConfirmed: handle(outcome:))
+        .swAlert()
+    }
+
+    /// 动作成功之后详情页要做的事。
+    private func handle(outcome: JobActionOutcome) {
+        switch outcome {
+        case .deleted:
+            // 200 已经证明这条没了，再留在页面上只会等来一个 404。
+            dismiss()
+        case let .restarted(newJobID):
+            SWAlertManager.shared.show(.success, message: "已重新提交为新任务")
+            if let newJobID {
+                onRestarted?(newJobID)
+            }
+        case .cancelling:
+            // 什么都不做：任务还是活跃的，事件流开着，`job_cancelled` 会把新状态送回来。
+            break
+        case .requeued:
+            // 这一条**必须**重来一遍生命周期，别的都不用。
+            //
+            // `streamEventsWhileActive` 的循环条件是 `!streamShouldClose`，任务进终态
+            // 就收工不再连了 —— 对 active → terminal 是对的，反过来就没救了：重试把一个
+            // failed 的任务打回 queued，页面这边没有任何东西会告诉它。结果就是详情页
+            // 一直显示「失败」、⋯ 菜单一直挂着「重新开始」，再点一次必得 409。
+            // （实测过：本机后端上重试之后，菜单里那两个按钮原样不动。）
+            //
+            // 重新拉一次快照 + 重新连事件流，之后就又由事件流接管了。
+            lifecycleGeneration += 1
         }
     }
 
@@ -203,6 +244,15 @@ struct DownloadDetailView: View {
                             continue
                         }
                         guard event.id > lastEventID else { continue }
+                        // 任务被删掉时后端会在这条流上补一块墓碑事件（`job_deleted`，
+                        // 见 backend domain.go:428），随后这条流自己就结束了。别的设备
+                        // 上删掉的任务靠它退出，不然这页会一直挂着一份再也不会更新的
+                        // 快照，直到用户下拉刷新才撞上 404。
+                        if event.type == "job_deleted" {
+                            socket.cancel(with: .normalClosure, reason: nil)
+                            dismiss()
+                            return
+                        }
                         lastEventID = event.id
                         guard detail?.apply(event) == true else { continue }
 
@@ -270,6 +320,13 @@ struct DownloadDetailView: View {
                   (error as? URLError)?.code != .cancelled else {
                 return
             }
+            // 任务不在了就退出，别把 404 当成一次普通的刷新失败挂在页面上。
+            // 后端这条 404 的错误体是 `{"error":"sql: no rows in result set"}`
+            // ——一句没法给人看的话，所以是按状态码判，不是按文案判。
+            if case .server(404, _, _)? = error as? DownloadsAPIError {
+                dismiss()
+                return
+            }
             if detail == nil {
                 errorMessage = error.localizedDescription
             }
@@ -278,8 +335,11 @@ struct DownloadDetailView: View {
 }
 
 private struct DownloadDetailLinkActions: View {
+    let job: Job
     let taskURL: URL?
+    let runner: JobActionRunner
     let showInfo: () -> Void
+    let onOutcome: (JobActionOutcome) -> Void
 
     var body: some View {
         ControlGroup {
@@ -303,6 +363,26 @@ private struct DownloadDetailLinkActions: View {
 
                 Button(action: showInfo) {
                     Label("详细信息", systemImage: "info.circle")
+                }
+
+                // 可用动作跟着 job.status 走，而 job 是详情页那份被事件流实时更新的
+                // 快照 —— 任务在菜单开着的时候跑完，下次展开就没有「停止」了。
+                let actions = job.status.availableActions
+                if !actions.isEmpty {
+                    Section {
+                        ForEach(actions) { action in
+                            Button(role: action.isDestructive ? .destructive : nil) {
+                                Task {
+                                    if let outcome = await runner.request(action, on: job) {
+                                        onOutcome(outcome)
+                                    }
+                                }
+                            } label: {
+                                Label(action.title, systemImage: action.symbolName)
+                            }
+                            .disabled(runner.action(forJobID: job.id) != nil)
+                        }
+                    }
                 }
             } label: {
                 Image(systemName: "ellipsis")
