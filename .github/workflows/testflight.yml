@@ -1,0 +1,334 @@
+name: TestFlight Beta
+
+# 发版入口(二选一),与后端 release.yml 的约定保持一致:
+#   - pull_request closed:dev -> main 的 PR 被合并时自动发版。版本号优先从
+#     PR 标题解析(形如 "Release v1.2.0: ..."),标题里没有版本号时回退到工程
+#     里的 MARKETING_VERSION,不会因此失败——iOS 的版本号本来就以工程设置为准。
+#   - workflow_dispatch:手动指定版本号发版,兜底路径。
+#
+# 流程:归档(archive)-> 导出 ipa -> 上传 App Store Connect -> 打 tag。
+# 上传成功后 TestFlight「内部测试」组的成员在构建处理完(通常几分钟到半小时)
+# 会自动收到,内部测试不需要 Beta 审核;外部测试组才需要提交审核。
+#
+# 需要的仓库 secret(缺任意一个都会在第一步明确报错):
+#   APPSTORE_ISSUER_ID       App Store Connect API 的 Issuer ID(UUID)
+#   APPSTORE_KEY_ID          API 密钥的 Key ID
+#   APPSTORE_PRIVATE_KEY     API 密钥 .p8 文件的完整内容
+#   BUILD_CERTIFICATE_BASE64 Apple Distribution 证书 .p12 的 base64
+#   P12_PASSWORD             上述 .p12 的密码
+#   KEYCHAIN_PASSWORD        runner 上临时钥匙串的密码(任意自定字符串)
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (例如: v1.0.0),留空则用工程里的 MARKETING_VERSION'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  testflight:
+    name: Build and upload to TestFlight
+    # 手动触发总是运行;PR 事件只在「来自 dev 且真的被合并」时运行,
+    # 直接 close 不合并、或从其他分支合入 main 的 PR 都不发版。
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.ref == 'dev')
+    runs-on: macos-latest
+    env:
+      PROJECT: amdl-ios.xcodeproj
+      SCHEME: amdl-ios
+
+    steps:
+      - name: Verify required secrets
+        # 先集中检查,避免跑完十几分钟的归档才发现缺 secret。
+        env:
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          BUILD_CERTIFICATE_DEV_BASE64: ${{ secrets.BUILD_CERTIFICATE_DEV_BASE64 }}
+          DEV_P12_PASSWORD: ${{ secrets.DEV_P12_PASSWORD }}
+        run: |
+          MISSING=""
+          for name in APPSTORE_ISSUER_ID APPSTORE_KEY_ID APPSTORE_PRIVATE_KEY \
+                      BUILD_CERTIFICATE_BASE64 P12_PASSWORD KEYCHAIN_PASSWORD \
+                      BUILD_CERTIFICATE_DEV_BASE64 DEV_P12_PASSWORD; do
+            if [ -z "${!name}" ]; then MISSING="$MISSING $name"; fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::缺少发版所需的仓库 secret:$MISSING。参见 CONTRIBUTING.md 的 TestFlight 发版小节。"
+            exit 1
+          fi
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # PR 合并触发时检出合并进 main 的那个提交;手动触发时用所选 ref。
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.ref }}
+
+      - name: Resolve version and build number
+        id: version
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          # 工程里的 MARKETING_VERSION 是版本号的事实来源。
+          PROJECT_VERSION=$(grep -m1 -o 'MARKETING_VERSION = [^;]*;' "$PROJECT/project.pbxproj" \
+            | sed 's/MARKETING_VERSION = //; s/;//' | tr -d ' ')
+
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="${INPUT_VERSION#v}"
+          else
+            VERSION=$(printf '%s' "$PR_TITLE" | grep -oE 'v[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1 | sed 's/^v//' || true)
+            if [ -z "$VERSION" ]; then
+              VERSION="$PROJECT_VERSION"
+              echo "PR 标题里没有版本号,使用工程内的 MARKETING_VERSION: $VERSION"
+            fi
+          fi
+
+          # 构建号必须在同一版本号下唯一且递增,否则 App Store Connect 会拒收。
+          # run_number 由 GitHub 单调递增维护,天然满足。
+          BUILD_NUMBER="${{ github.run_number }}"
+
+          # 解析不出版本号就地失败。以前空值会一路传下去,产物里的
+          # CFBundleShortVersionString 变成空字符串,直到 App Store Connect 退回
+          # 才发现。
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+            echo "::error::解析出的版本号 '$VERSION' 不是 X.Y 或 X.Y.Z 形式,无法发版。"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "发布版本: $VERSION (build $BUILD_NUMBER)"
+
+      - name: Install Apple certificates
+        # 需要两张证书：
+        #   Apple Distribution — 导出 ipa 时重签用；
+        #   Apple Development  — 归档时用。命令行 xcodebuild archive 的自动签名
+        #     固定解析成开发身份（Xcode IDE 才会在归档时自动切分发），缺开发证书
+        #     就会以 "No signing certificate iOS Development found" 失败。
+        #     曾经改用 CODE_SIGNING_ALLOWED=NO 绕开，但那会让 Xcode 跳过
+        #     entitlements 处理，产物里 applesignin / aps-environment /
+        #     application-groups / iCloud 全部丢失。
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_CERTIFICATE_DEV_BASE64: ${{ secrets.BUILD_CERTIFICATE_DEV_BASE64 }}
+          DEV_P12_PASSWORD: ${{ secrets.DEV_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/build_certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+          printf '%s' "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+
+          # 建一个临时钥匙串并设为默认，避免污染 runner 的登录钥匙串。
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" -P "$P12_PASSWORD" -A \
+            -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+
+          DEV_CERT_PATH="$RUNNER_TEMP/build_certificate_dev.p12"
+          printf '%s' "$BUILD_CERTIFICATE_DEV_BASE64" | base64 --decode > "$DEV_CERT_PATH"
+          security import "$DEV_CERT_PATH" -P "$DEV_P12_PASSWORD" -A \
+            -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm -f "$DEV_CERT_PATH"
+          # 允许 codesign 非交互访问私钥，否则归档时会卡在 UI 授权弹窗上。
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          rm -f "$CERT_PATH"
+          echo "已导入的签名身份:"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Install App Store Connect API key
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+        run: |
+          # altool / xcodebuild 会在这些固定位置查找密钥文件。
+          mkdir -p ~/private_keys
+          printf '%s' "$APPSTORE_PRIVATE_KEY" > ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8
+          chmod 600 ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8
+
+      - name: Archive
+        env:
+          # 门户主机名不在仓库里（Config/Portal.xcconfig 被 .gitignore 忽略），
+          # 所以发版构建必须从密钥注入，否则装出来的 App 没有内置默认地址，
+          # 用户第一次打开要自己填。
+          AMDL_PORTAL_HOST: ${{ secrets.AMDL_PORTAL_HOST }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          set -o pipefail
+          # 归档必须真正签名，否则 Xcode 跳过 entitlements 处理，产物里
+          # applesignin / aps-environment / application-groups / iCloud
+          # 全部丢失（登录报 ASAuthorizationError 1000，推送和实时活动静默失效）。
+          #
+          # 命令行下自动签名固定解析成开发身份，所以上一步导入了开发证书；
+          # -allowProvisioningUpdates 配合 API key 按需创建开发描述文件。
+          # 分发签名在后面的 -exportArchive 完成，那才是 Xcode 的正常流程。
+          #
+          # 版本号直接作为构建设置传进来，**不再用 agvtool**。
+          # 以前这里前面有一步 `xcrun agvtool new-marketing-version "$VERSION"`，
+          # 它从来没起过作用，而且退出码是 0、日志还打印 "Updated ... to 2.0"，
+          # 所以 v1.1 / v1.3 / v2.0 三次发版全都以 1.0 上传，没人发现：
+          #   - agvtool 的 new-marketing-version 只会改 Info.plist 文件里**已经
+          #     存在**的 CFBundleShortVersionString 键，它不碰 MARKETING_VERSION
+          #     这个构建设置；
+          #   - 本工程所有 target 都是 GENERATE_INFOPLIST_FILE = YES，源码里的
+          #     Info.plist 根本没有 CFBundleShortVersionString 这一项，
+          #     产物里的那一项是 Xcode 从 $(MARKETING_VERSION) 生成的。
+          #     于是 agvtool 一个字节都没写，MARKETING_VERSION 始终是 1.0。
+          # 构建号之所以一直是对的，是因为 `agvtool new-version -all` 另有一条
+          # 路径会把 CURRENT_PROJECT_VERSION 写进 project.pbxproj —— 而
+          # new-marketing-version 没有对应的那一半。
+          #
+          # 命令行构建设置对本次构建里的**每个** target 生效，主 App 和三个扩展
+          # 因此天然一致，不需要逐个 target 去改工程文件。
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/amdl-ios.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8 \
+            -authenticationKeyID "$APPSTORE_KEY_ID" \
+            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD" \
+            AMDL_PORTAL_HOST="${AMDL_PORTAL_HOST}"
+
+      - name: Verify archived version numbers
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          # 唯一可信的证据是产物本身。上一步的构建设置有没有真的落到
+          # CFBundleShortVersionString 上，只有读归档里的 Info.plist 才知道 ——
+          # 工作流文件写得再对也不算数，这个 bug 就是这么活过三次发版的。
+          #
+          # 扩展的版本号必须和主 App 完全一致，否则 App Store Connect 会以
+          # CFBundleShortVersionString / CFBundleVersion mismatch 拒收整个包。
+          APP="$RUNNER_TEMP/amdl-ios.xcarchive/Products/Applications/amdl-ios.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::归档里没有找到 $APP"
+            exit 1
+          fi
+
+          FAILED=0
+          check() {
+            local label="$1" plist="$2"
+            local short build
+            short=$(plutil -extract CFBundleShortVersionString raw -o - "$plist" 2>/dev/null || echo "<缺失>")
+            build=$(plutil -extract CFBundleVersion raw -o - "$plist" 2>/dev/null || echo "<缺失>")
+            echo "$label: $short ($build)"
+            if [ "$short" != "$VERSION" ]; then
+              echo "::error::$label 的 CFBundleShortVersionString 是 '$short'，期望 '$VERSION'。"
+              FAILED=1
+            fi
+            if [ "$build" != "$BUILD" ]; then
+              echo "::error::$label 的 CFBundleVersion 是 '$build'，期望 '$BUILD'。"
+              FAILED=1
+            fi
+          }
+
+          check "amdl-ios.app" "$APP/Info.plist"
+          # 三个扩展一个都不能漏：只有一个掉队也会被拒收。
+          EXTENSIONS=0
+          for appex in "$APP"/PlugIns/*.appex; do
+            [ -d "$appex" ] || continue
+            EXTENSIONS=$((EXTENSIONS + 1))
+            check "$(basename "$appex")" "$appex/Info.plist"
+          done
+          if [ "$EXTENSIONS" -ne 3 ]; then
+            echo "::error::归档里只有 $EXTENSIONS 个扩展，期望 3 个（分享 / 实时活动 / 通知服务）。"
+            FAILED=1
+          fi
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::归档里的版本号和期望的 $VERSION ($BUILD) 不一致，中止发版。"
+            exit 1
+          fi
+          echo "归档版本号校验通过: $VERSION ($BUILD)"
+
+      - name: Export ipa
+        env:
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/amdl-ios.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist .github/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8 \
+            -authenticationKeyID "$APPSTORE_KEY_ID" \
+            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID"
+          ls -la "$RUNNER_TEMP/export"
+
+      - name: Upload to TestFlight
+        env:
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+        run: |
+          IPA=$(find "$RUNNER_TEMP/export" -name '*.ipa' -maxdepth 1 | head -n1)
+          if [ -z "$IPA" ]; then
+            echo "::error::导出目录里没有找到 ipa"
+            exit 1
+          fi
+          echo "上传: $IPA"
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$IPA" \
+            --apiKey "$APPSTORE_KEY_ID" \
+            --apiIssuer "$APPSTORE_ISSUER_ID"
+
+      - name: Upload build artifacts
+        # 上传失败时也保留产物，便于本地复现或手动用 Transporter 上传。
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipa-${{ steps.version.outputs.version }}-${{ steps.version.outputs.build }}
+          path: ${{ runner.temp }}/export
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Tag the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          TAG="v${VERSION}+${BUILD}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "标签 $TAG 已存在，跳过打标签。"
+            exit 0
+          fi
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "已打标签 $TAG"
+
+      - name: Clean up keychain and keys
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" 2>/dev/null || true
+          rm -rf ~/private_keys
