@@ -34,6 +34,9 @@ struct DownloadDetailView: View {
     @State private var lastEventID: Int64 = 0
     @State private var presentedQualityDetails: AudioQualityPresentation.Details?
     @State private var isShowingInfo = false
+    @State private var speedTracker = TaskSpeedTracker()
+    @AppStorage("downloadDetail.showsRealtimeSpeed")
+    private var showsRealtimeSpeed = false
     private var job: Job? {
         detail?.job ?? initialJob
     }
@@ -48,6 +51,10 @@ struct DownloadDetailView: View {
 
     private var hooks: [HookState] {
         detail?.hooks ?? []
+    }
+
+    private var speedPresentation: TaskSpeedPresentation? {
+        showsRealtimeSpeed ? speedTracker.presentation : nil
     }
 
     private var appleMusicURL: URL? {
@@ -93,6 +100,7 @@ struct DownloadDetailView: View {
                     job: job,
                     items: items,
                     progress: progress,
+                    speed: speedPresentation,
                     errorMessage: errorMessage,
                     palette: palette,
                     presentedQualityDetails: $presentedQualityDetails
@@ -102,6 +110,7 @@ struct DownloadDetailView: View {
                     job: job,
                     items: items,
                     progress: progress,
+                    speed: speedPresentation,
                     isLoading: isLoading,
                     hasLoadedDetail: detail != nil,
                     errorMessage: errorMessage,
@@ -131,6 +140,7 @@ struct DownloadDetailView: View {
                             job: job,
                             taskURL: appleMusicURL,
                             runner: actionRunner,
+                            showsRealtimeSpeed: $showsRealtimeSpeed,
                             showInfo: { isShowingInfo = true },
                             onOutcome: handle(outcome:)
                         )
@@ -212,12 +222,14 @@ struct DownloadDetailView: View {
     }
 
     private func runDetailLifecycle() async {
+        speedTracker.reset()
         if let cachedData = await DownloadDetailCache.shared.loadData(jobID: jobID),
            var cached = try? JSONDecoder().decode(DownloadDetail.self, from: cachedData) {
             if let initialJob {
                 cached.job.preservePresentationMetadata(from: initialJob)
             }
             detail = cached
+            speedTracker.update(with: cached.items)
             lastEventID = max(lastEventID, cached.lastEventID ?? 0)
         }
         let hasCache = detail != nil
@@ -255,6 +267,9 @@ struct DownloadDetailView: View {
                         }
                         lastEventID = event.id
                         guard detail?.apply(event) == true else { continue }
+                        if let detail {
+                            speedTracker.update(with: detail.items)
+                        }
 
                         if event.requiresDetailSnapshotRefresh {
                             await load(showLoading: false)
@@ -306,6 +321,7 @@ struct DownloadDetailView: View {
                     snapshot.job.preservePresentationMetadata(from: initialJob)
                 }
                 detail = snapshot
+                speedTracker.update(with: snapshot.items)
                 await DownloadLiveActivityManager.shared.refreshFromDetail(snapshot)
                 guard !Task.isCancelled else { return }
                 lastEventID = max(lastEventID, snapshotEventID)
@@ -338,6 +354,7 @@ private struct DownloadDetailLinkActions: View {
     let job: Job
     let taskURL: URL?
     let runner: JobActionRunner
+    @Binding var showsRealtimeSpeed: Bool
     let showInfo: () -> Void
     let onOutcome: (JobActionOutcome) -> Void
 
@@ -363,6 +380,10 @@ private struct DownloadDetailLinkActions: View {
 
                 Button(action: showInfo) {
                     Label("详细信息", systemImage: "info.circle")
+                }
+
+                Toggle(isOn: $showsRealtimeSpeed) {
+                    Label("实时速度显示", systemImage: "chart.xyaxis.line")
                 }
 
                 // 可用动作跟着 job.status 走，而 job 是详情页那份被事件流实时更新的

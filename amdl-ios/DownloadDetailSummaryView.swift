@@ -9,6 +9,7 @@ struct DownloadSongDetailContent: View {
     let job: Job?
     let items: [JobItem]
     let progress: Double
+    var speed: TaskSpeedPresentation?
     let errorMessage: String?
     let palette: DownloadDetailPalette?
     @Binding var presentedQualityDetails: AudioQualityPresentation.Details?
@@ -29,6 +30,7 @@ struct DownloadSongDetailContent: View {
                             job: job,
                             items: items,
                             progress: progress,
+                            speed: speed,
                             albumTracksOmitSubtitles: false,
                             palette: palette,
                             presentedQualityDetails: $presentedQualityDetails
@@ -47,6 +49,7 @@ struct DownloadDetailSummaryView: View {
     let job: Job
     let items: [JobItem]
     let progress: Double
+    var speed: TaskSpeedPresentation?
     let albumTracksOmitSubtitles: Bool
     let palette: DownloadDetailPalette?
     @Binding var presentedQualityDetails: AudioQualityPresentation.Details?
@@ -167,6 +170,12 @@ struct DownloadDetailSummaryView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(palette?.secondaryText ?? Color.secondary)
 
+                if let speed, job.status.isActive {
+                    TaskSpeedReadout(
+                        speed: speed,
+                        color: palette?.secondaryText ?? Color.secondary
+                    )
+                }
             }
             .padding(.horizontal, 24)
             .padding(.top, 8)
@@ -194,6 +203,10 @@ struct DownloadDetailSummaryView: View {
             .font(.title2.bold())
             .foregroundStyle(palette?.primaryText ?? Color.primary)
             .multilineTextAlignment(.center)
+            // 元数据回来前 displayName 是原始 URL。链接很长时固定一行并在尾部
+            // 省略；真正的曲目/专辑标题仍保留原来的多行排版。
+            .lineLimit(nonempty(job.title) == nil ? 1 : nil)
+            .truncationMode(.tail)
 
         if let url = AppleMusicLinks.collectionURL(for: job) {
             Button {
@@ -271,6 +284,101 @@ struct DownloadDetailSummaryView: View {
     }
 }
 
+private struct TaskSpeedReadout: View {
+    let speed: TaskSpeedPresentation
+    let color: Color
+
+    private let downloadColor = Color.blue
+    private let decryptColor = Color.orange
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 16) {
+                Label(
+                    "下载 \(TransferSpeedFormat.string(bytesPerSecond: speed.downloadBytesPerSecond))",
+                    systemImage: "arrow.down"
+                )
+                .foregroundStyle(downloadColor)
+                .accessibilityLabel(
+                    "下载速度 \(TransferSpeedFormat.string(bytesPerSecond: speed.downloadBytesPerSecond))"
+                )
+
+                Label(
+                    "解密 \(TransferSpeedFormat.string(bytesPerSecond: speed.decryptBytesPerSecond))",
+                    systemImage: "lock.open"
+                )
+                .foregroundStyle(decryptColor)
+                .accessibilityLabel(
+                    "解密速度 \(TransferSpeedFormat.string(bytesPerSecond: speed.decryptBytesPerSecond))"
+                )
+            }
+
+            TaskSpeedTrendChart(
+                points: speed.history,
+                downloadColor: downloadColor,
+                decryptColor: decryptColor
+            )
+                .frame(height: 44)
+                .accessibilityLabel("下载与解密速度变化趋势")
+                .accessibilityValue(
+                    "下载 \(TransferSpeedFormat.string(bytesPerSecond: speed.downloadBytesPerSecond))，"
+                        + "解密 \(TransferSpeedFormat.string(bytesPerSecond: speed.decryptBytesPerSecond))"
+                )
+        }
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(color)
+        .padding(.top, 2)
+    }
+}
+
+private struct TaskSpeedTrendChart: View {
+    let points: [TaskSpeedPoint]
+    let downloadColor: Color
+    let decryptColor: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let downloadValues = points.map(\.downloadBytesPerSecond)
+            let decryptValues = points.map(\.decryptBytesPerSecond)
+            guard points.count >= 2 else {
+                return
+            }
+            let maximum = max(downloadValues.max() ?? 0, decryptValues.max() ?? 0)
+            guard maximum > 0 else { return }
+
+            let horizontalStep = size.width / CGFloat(points.count - 1)
+            let topInset: CGFloat = 2
+            let chartHeight = max(size.height - topInset - 2, 1)
+
+            func line(for values: [Double]) -> Path {
+                let chartPoints = values.enumerated().map { index, value in
+                    CGPoint(
+                        x: CGFloat(index) * horizontalStep,
+                        y: topInset + chartHeight * (1 - value / maximum)
+                    )
+                }
+                var path = Path()
+                path.move(to: chartPoints[0])
+                for point in chartPoints.dropFirst() {
+                    path.addLine(to: point)
+                }
+                return path
+            }
+
+            context.stroke(
+                line(for: downloadValues),
+                with: .color(downloadColor),
+                style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+            )
+            context.stroke(
+                line(for: decryptValues),
+                with: .color(decryptColor),
+                style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+            )
+        }
+    }
+}
+
 /// 曲目总时长的展示格式，仿 Apple Music 专辑/歌单底注：单位随长短自动切换，
 /// 不足 1 小时用「X 分钟」，否则用「X 小时 Y 分钟」并在整点省略分钟。时长是目录
 /// 元数据，下载中也可用；没有任何时长（合计为 0，如旧后端）时返回 nil。
@@ -298,36 +406,17 @@ enum TrackDurationSummary {
 /// 真实占位，却算不进音频码率。只要还有一首是估出来的，整行就说「约」；每首都拿到
 /// 真实大小才说「共」。一首都算不出（如 aac-lc 没有逐曲清单可读码率，且尚未下载）
 /// 时返回 nil，宁可不显示也不瞎猜。
-enum TrackSizeSummary {
+enum TrackSizeEstimator {
     /// 每首歌的元数据补偿字节数。按十进制 MB 记，与展示用的 `.file` 口径一致。
-    private static let metadataOverheadBytes = 1_500_000.0
+    static let metadataOverheadBytes = 1_200_000.0
 
-    static func totalSizeText(for items: [JobItem]) -> String? {
-        // 同一张专辑各曲码率一致，所以某首还没解析出码率时，用已知曲目的均值顶上——
-        // 只要有一首进了下载阶段，整张专辑就能给出估算。
-        let fallbackBitrate = representativeBitrate(for: items)
-        var exactBytes: Int64 = 0
-        var estimatedBytes = 0.0
-        var hasEstimate = false
-
-        for item in items {
-            if let fileSize = item.fileSize, fileSize > 0 {
-                exactBytes += fileSize
-                continue
-            }
-            guard let durationMs = item.durationMs, durationMs > 0 else { continue }
-            guard let bitrate = positive(item.bitrate) ?? fallbackBitrate else { continue }
-            estimatedBytes += Double(bitrate) * (Double(durationMs) / 1000) / 8 + metadataOverheadBytes
-            hasEstimate = true
-        }
-
-        let total = exactBytes + Int64(estimatedBytes.rounded())
-        guard total > 0 else { return nil }
-        let formatted = total.formatted(.byteCount(style: .file))
-        return hasEstimate ? "约 \(formatted)" : "共 \(formatted)"
+    static func estimatedBytes(for item: JobItem, fallbackBitrate: Int?) -> Double? {
+        guard let durationMs = item.durationMs, durationMs > 0 else { return nil }
+        guard let bitrate = positive(item.bitrate) ?? fallbackBitrate else { return nil }
+        return Double(bitrate) * (Double(durationMs) / 1000) / 8 + metadataOverheadBytes
     }
 
-    private static func representativeBitrate(for items: [JobItem]) -> Int? {
+    static func representativeBitrate(for items: [JobItem]) -> Int? {
         let known = items.compactMap { positive($0.bitrate) }
         guard !known.isEmpty else { return nil }
         return known.reduce(0, +) / known.count
@@ -337,6 +426,39 @@ enum TrackSizeSummary {
         guard let value, value > 0 else { return nil }
         return value
     }
+}
+
+enum TrackSizeSummary {
+
+    static func totalSizeText(for items: [JobItem]) -> String? {
+        // 同一张专辑各曲码率一致，所以某首还没解析出码率时，用已知曲目的均值顶上——
+        // 只要有一首进了下载阶段，整张专辑就能给出估算。
+        let fallbackBitrate = TrackSizeEstimator.representativeBitrate(for: items)
+        var exactBytes: Int64 = 0
+        var estimatedBytes = 0.0
+        var hasEstimate = false
+
+        for item in items {
+            if let fileSize = item.fileSize, fileSize > 0 {
+                exactBytes += fileSize
+                continue
+            }
+            guard let itemEstimate = TrackSizeEstimator.estimatedBytes(
+                for: item,
+                fallbackBitrate: fallbackBitrate
+            ) else {
+                continue
+            }
+            estimatedBytes += itemEstimate
+            hasEstimate = true
+        }
+
+        let total = exactBytes + Int64(estimatedBytes.rounded())
+        guard total > 0 else { return nil }
+        let formatted = total.formatted(.byteCount(style: .file))
+        return hasEstimate ? "约 \(formatted)" : "共 \(formatted)"
+    }
+
 }
 
 /// 「流派 · 年份 · 音质 · 区域」那一行。方形概览和竖版出血头图共用，保证两种

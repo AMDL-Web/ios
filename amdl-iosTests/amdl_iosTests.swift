@@ -187,6 +187,108 @@ struct amdl_iosTests {
         )
     }
 
+    @Test func trackSizeEstimatorUsesReducedSharedOverhead() throws {
+        var item = try qualityItem(
+            codec: "alac",
+            bitDepth: 24,
+            sampleRate: 96_000,
+            bitrate: 800_000
+        )
+        item.durationMs = 100_000
+        item.fileSize = nil
+
+        let estimatedBytes = try #require(
+            TrackSizeEstimator.estimatedBytes(for: item, fallbackBitrate: nil)
+        )
+
+        // 800 kbps × 100 秒 ÷ 8 = 10 MB，再加调整后的 1.2 MB 元数据补偿。
+        try assert(abs(estimatedBytes - 11_200_000) < 0.001, "shared size estimate")
+        try assert(
+            TrackSizeEstimator.metadataOverheadBytes == 1_200_000,
+            "reduced metadata overhead"
+        )
+    }
+
+    @Test func taskSpeedTrackerAggregatesDownloadAndDecryptAndKeepsTrend() throws {
+        var downloading = try speedItem(
+            id: "downloading",
+            status: "downloading",
+            download: 0.1,
+            decrypt: 0,
+            updatedAt: "2026-07-29T00:00:00Z"
+        )
+        var decrypting = try speedItem(
+            id: "decrypting",
+            status: "decrypting",
+            download: 1,
+            decrypt: 0.2,
+            updatedAt: "2026-07-29T00:00:00Z"
+        )
+        var tracker = TaskSpeedTracker()
+        tracker.update(with: [downloading, decrypting])
+
+        downloading.progress.download = 0.2
+        downloading.updatedAt = try #require(
+            ISO8601DateFormatter().date(from: "2026-07-29T00:00:02Z")
+        )
+        decrypting.progress.decrypt = 0.4
+        decrypting.updatedAt = downloading.updatedAt
+        tracker.update(with: [downloading, decrypting])
+
+        // 每首估算 11.2 MB：下载两秒推进 10%，解密两秒推进 20%。
+        try assert(
+            abs(tracker.presentation.downloadBytesPerSecond - 560_000) < 0.001,
+            "aggregate download speed"
+        )
+        try assert(
+            abs(tracker.presentation.decryptBytesPerSecond - 1_120_000) < 0.001,
+            "aggregate decrypt speed"
+        )
+        try assert(tracker.presentation.history.count == 2, "trend keeps both samples")
+        try assert(
+            tracker.presentation.history.last?.downloadBytesPerSecond
+                == tracker.presentation.downloadBytesPerSecond,
+            "trend records current download speed"
+        )
+        try assert(
+            tracker.presentation.history.last?.decryptBytesPerSecond
+                == tracker.presentation.decryptBytesPerSecond,
+            "trend records current decrypt speed"
+        )
+    }
+
+    @Test func taskSpeedTrackerRejectsSubsecondPercentBurstSpikes() throws {
+        var item = try speedItem(
+            id: "burst",
+            status: "downloading",
+            download: 0,
+            decrypt: 0,
+            updatedAt: "2026-07-29T00:00:00Z"
+        )
+        var tracker = TaskSpeedTracker()
+        tracker.update(with: [item])
+
+        // 后端以整数百分比为推送门槛，连续几个事件可能在 20 ms 内成批抵达。11.2 MB
+        // 曲目的 1% 若直接除以 20 ms，会凭空显示 5.6 MB/s；它应只进入滚动窗口。
+        item.progress.download = 0.01
+        item.updatedAt = item.updatedAt.addingTimeInterval(0.02)
+        tracker.update(with: [item])
+        try assert(
+            tracker.presentation.downloadBytesPerSecond == 0,
+            "subsecond percent burst must not become a speed"
+        )
+
+        item.progress.download = 0.1
+        item.updatedAt = try #require(
+            ISO8601DateFormatter().date(from: "2026-07-29T00:00:02Z")
+        )
+        tracker.update(with: [item])
+        try assert(
+            abs(tracker.presentation.downloadBytesPerSecond - 560_000) < 0.001,
+            "rolling window produces the two-second average"
+        )
+    }
+
     @Test func songDetailPresentationUsesItemMetadataAndSingleStatus() throws {
         let detail = try songDetail(status: "running", itemStatus: "downloading")
         let item = try #require(detail.items.first)
@@ -472,6 +574,33 @@ struct amdl_iosTests {
         object["bit_depth"] = bitDepth
         object["sample_rate"] = sampleRate
         object["bitrate"] = bitrate
+        return try DownloadsAPI.decodeJobItem(from: JSONSerialization.data(withJSONObject: object))
+    }
+
+    private func speedItem(
+        id: String,
+        status: String,
+        download: Double,
+        decrypt: Double,
+        updatedAt: String
+    ) throws -> JobItem {
+        let object: [String: Any] = [
+            "id": id,
+            "job_id": "speed_job",
+            "adam_id": id,
+            "kind": "song",
+            "index": 1,
+            "title": id,
+            "duration_ms": 100_000,
+            "bitrate": 800_000,
+            "status": status,
+            "progress": [
+                "download": download, "decrypt": decrypt, "resolved": true,
+                "remuxed": false, "verified": false, "tagged": false, "saved": false
+            ],
+            "created_at": "2026-07-29T00:00:00Z",
+            "updated_at": updatedAt
+        ]
         return try DownloadsAPI.decodeJobItem(from: JSONSerialization.data(withJSONObject: object))
     }
 
@@ -836,6 +965,40 @@ struct amdl_iosTests {
 
     private struct TestFailure: Error {
         let message: String
+    }
+
+    /// 后端按跨整数百分比发事件，峰值下一秒能来几十个。折线若一个事件一个点，
+    /// 36 个点只覆盖约一秒，横轴就没有可比的刻度了。同一秒内的事件必须改写
+    /// 当前点而不是各自追加，读数本身仍然每个事件都更新。
+    @Test func speedHistoryIsSampledOnceASecondNotOncePerEvent() throws {
+        var item = try speedItem(
+            id: "t", status: "downloading", download: 0,
+            decrypt: 0, updatedAt: "2026-07-29T00:00:00Z"
+        )
+        var tracker = TaskSpeedTracker()
+        tracker.update(with: [item])
+
+        // 十个事件挤在同一秒里。
+        for step in 1...10 {
+            item.progress.download = Double(step) / 100
+            item.updatedAt = try #require(
+                ISO8601DateFormatter().date(from: "2026-07-29T00:00:00Z")
+            ).addingTimeInterval(Double(step) * 0.05)
+            tracker.update(with: [item])
+        }
+        try assert(tracker.presentation.history.count == 1, "ten sub-second events collapse to one point")
+
+        // 越过节流窗口才追加下一个点。
+        item.progress.download = 0.4
+        item.updatedAt = try #require(
+            ISO8601DateFormatter().date(from: "2026-07-29T00:00:02Z")
+        )
+        tracker.update(with: [item])
+        try assert(tracker.presentation.history.count == 2, "a point past the window appends")
+
+        // 每个点的 id 唯一，Identifiable 的图表才不会错位复用。
+        let ids = tracker.presentation.history.map(\.id)
+        try assert(Set(ids).count == ids.count, "history ids stay unique")
     }
 }
 
@@ -1253,4 +1416,5 @@ struct NotificationDeepLinkTests {
         #expect(route.take() == nil)
         #expect(route.jobID == nil)
     }
+
 }

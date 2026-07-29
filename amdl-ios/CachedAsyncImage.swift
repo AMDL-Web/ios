@@ -199,6 +199,7 @@ struct CachedAsyncImage: View {
     let cacheKey: String
     let fallbackCacheKey: String?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var uiImage: UIImage?
 
     init(url: URL?, cacheKey: String? = nil, fallbackCacheKey: String? = nil) {
@@ -220,10 +221,17 @@ struct CachedAsyncImage: View {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFill()
+                    .transition(.opacity)
             } else {
                 Color.clear
             }
         }
+        // 只动画「占位 → 第一张可用图片」。缩略图随后换成大图时 uiImage 仍非空，
+        // 这个布尔值不变，因此不会再淡一次；内存缓存首帧命中也不会先画占位。
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.25),
+            value: uiImage == nil
+        )
         .task(id: "\(cacheKey)|\(url?.absoluteString ?? "")") {
             await load()
         }
