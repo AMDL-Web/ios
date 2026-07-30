@@ -79,13 +79,16 @@ struct DebugView: View {
                 if appleAuth.isSignedIn {
                     LabeledContent("账号", value: appleAuth.email ?? "已登录")
                     LabeledContent("会话", value: appleTokenStatusText)
-                    // 凭据是 Apple 的 identity token 本身，只活约十分钟，而且没有
-                    // 静默续期的办法。所以过期是**常态**而不是异常，界面必须直说
-                    // 一句，否则用户看到的只是"每隔一会儿就要重新登录一次"，像是
-                    // 坏了。取舍的来龙去脉见 GatewayCredential 的注释。
+                    // 凭据是 Apple 的 identity token 本身，没有静默续期的办法，所以
+                    // 过期是**常态**而不是异常，界面要直说一句，否则用户看到的只是
+                    // "隔一阵就要重新登录"，像是坏了。
+                    //
+                    // 不要在这句话里写死时长。上面「会话」那行显示的是从 token 的
+                    // `exp` 解出来的真实剩余时间；写死数字正是之前出过的错——文案说
+                    // 十分钟，实际约一天。取舍见 GatewayCredential 的注释。
                     if !appleAuth.hasValidToken {
                         Label {
-                            Text("登录已过期，重新登录一次即可。Apple 的登录凭据只有约十分钟有效期，而且无法自动续期。")
+                            Text("登录已过期，重新登录一次即可。Apple 的登录凭据不能自动续期，到期后需要手动登录。")
                         } icon: {
                             Image(systemName: "clock.badge.exclamationmark")
                         }

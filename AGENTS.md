@@ -38,7 +38,7 @@ Concrete invariants worth knowing before you touch them:
 
 Prefer making a caller `async` over spawning an unstructured `Task`.
 
-## Auth: the credential is Apple's own token, and it expires in ten minutes
+## Auth: the credential is Apple's own token, and it cannot be renewed
 
 `GatewayAuth.swift` is the whole of it. The app signs in natively, keeps the
 Apple identity token, and sends **that token itself** as
@@ -47,10 +47,17 @@ against Apple's JWKS and checks an email allow-list. It issues nothing of its
 own and does not report who the caller is, because there is one user and
 nothing downstream has anywhere to put a name.
 
-**An Apple identity token lives about ten minutes and there is no silent way to
-mint another** — `getCredentialState` reports that the authorization still
-stands, it does not issue a token. So the app re-prompts. That is a known,
-accepted cost, not a bug to fix here:
+**There is no silent way to mint another Apple identity token** —
+`getCredentialState` reports that the authorization still stands, it does not
+issue a token. So the app re-prompts when the current one expires. That is a
+known, accepted cost, not a bug to fix here:
+
+**Do not write a lifetime into any comment or any string.** The repo said "about
+24 hours", someone "corrected" it to "about 10 minutes" as an observation error,
+and the 10 minutes then propagated into four documents and one user-facing
+label. Reading `exp` off the real token on 2026-07-30 gave **~23.4 hours** — the
+"correction" was the error. The code parses `exp` precisely so nobody has to
+believe a number in a comment; leave it that way.
 
 - `amdl-portal` existed to remove it (identity token → its own access/refresh
   pair, 1 hour / 60 days). The portal was deleted when the system went back to
@@ -64,8 +71,8 @@ accepted cost, not a bug to fix here:
   *usable*, not just present — otherwise the UI would claim you are signed in
   while every request 401s.
 
-Expiry is read from the token's own `exp` claim, not "received + 10 min": ten
-minutes is a measured value, not a contract.
+The 10-minute fallback in `GatewayCredential.init` is a deliberately pessimistic
+floor for an unparsable token, **not** an estimate of the real lifetime.
 
 The credential lives in the **Keychain** (`GatewayCredentialStore`), access
 group = the App Group id, `AfterFirstUnlock` so the notification extension can

@@ -7,25 +7,29 @@ import Security
 /// 直接验这个 token 的签名，再比一遍邮箱白名单。它不发自己的令牌、不存会话、
 /// 也不关心调用者是谁 —— 只回答"过，还是不过"。
 ///
-/// ## 这里有一个已知的体验代价，不是 bug
+/// ## 有效期：读 token 自己说的，不要猜
 ///
-/// **Apple 的 identity token 实测只活约 10 分钟**，而且没有任何静默续期手段：
-/// `getCredentialState` 只告诉你授权还在，不会签发新 token。所以 token 一过期，
-/// 下一个请求就是 401，用户得重新弹一次系统登录面板。
+/// 到期时刻是从这个 JWT 的 `exp` claim 解出来的，不是按经验值估的。**这一点是有
+/// 来历的**：仓库里先写着「约 24 小时」，后来被"修正"成「约 10 分钟」并注明前者是
+/// 观察错误——而 2026-07-30 在真机上读出来的 `exp` 是 **约 23.4 小时**，也就是说
+/// 被改掉的那个才是对的，"修正"是错的，并且这个错在文档和界面文案里传播了一圈。
 ///
-/// 这正是 `amdl-portal` 当初存在的理由 —— 它用 identity token 换一对
-/// access/refresh（1 小时 / 60 天），App 因此能连着用两个月不弹面板。整套系统
-/// 改回单用户设计时门户被删掉了，这个代价就跟着回来了。
+/// 所以这里不写死任何数字。Apple 想改随时可以改，而 `exp` 是这个 token 自己说的话。
 ///
-/// 要消掉它，只有让**服务端**签发长效令牌，而那无论写得多薄都是一层服务端会话。
-/// 那不是 App 侧能修的东西，也别在这里想办法绕 —— 唯一"能绕"的做法是把 token 存得
-/// 更久一点，而那只会让请求带着一个必定被拒的凭据出门。
+/// 实际代价：**大约一天重新登录一次**，因为没有静默续期手段
+/// （`getCredentialState` 只告诉你授权还在，不会签发新 token）。
+///
+/// 这比 `amdl-portal` 那一版（access 1 小时 / refresh 60 天、可连用两个月）仍然是
+/// 退步，但退得远没有"每十几分钟弹一次面板"那么严重——那个说法是基于上面那个错误
+/// 数字得出的。要不要为此再造一层服务端会话，是产品判断，请按一天一次来权衡。
+///
 nonisolated struct GatewayCredential: Codable, Sendable {
     let identityToken: String
     /// 从 token 自己的 `exp` claim 解出来的到期时刻。
     ///
-    /// 解 JWT 而不是"收到时间 + 10 分钟"：10 分钟是实测值不是契约，Apple 想改随时
-    /// 可以改，而 `exp` 是这个 token 自己说的话。解不出来时按 10 分钟兜底。
+    /// 解 JWT 而不是按经验值加一个偏移——见上面为什么。解不出来时按 10 分钟兜底，
+    /// 那**不是**对真实寿命的估计，而是刻意悲观：宁可早问一次，也不要带着一个已经
+    /// 失效的凭据出门。
     let expiresAt: Date
 
     /// 留 30 秒余量：请求在路上过期就是白跑一趟 401。
@@ -33,6 +37,7 @@ nonisolated struct GatewayCredential: Codable, Sendable {
 
     init(identityToken: String, receivedAt: Date = Date()) {
         self.identityToken = identityToken
+        // 兜底 10 分钟是刻意保守的下限，不是观测值；见 expiresAt 的注释。
         self.expiresAt = Self.expiry(ofJWT: identityToken) ?? receivedAt.addingTimeInterval(600)
     }
 
@@ -58,8 +63,8 @@ nonisolated struct GatewayCredential: Codable, Sendable {
 /// 凭据的持久化。
 ///
 /// **放在 Keychain 而不是 App Group 的 UserDefaults**：UserDefaults 的 plist 是明文、
-/// 会进 iTunes/iCloud 备份、也没有"设备解锁后才可读"这种保护。这个 token 只活十分钟，
-/// 危害确实比一份 60 天的 refresh token 小，但十分钟里它就是这套部署的通行证 ——
+/// 会进 iTunes/iCloud 备份、也没有"设备解锁后才可读"这种保护。这个 token 大约活一天，
+/// 危害比一份 60 天的 refresh token 小，但这一天里它就是这套部署的通行证 ——
 /// 而且更实际的理由是：早先版本正是把它明文存在 UserDefaults 里，那是个被专门修掉的
 /// 问题，不该因为门户没了就退回去。`AppleAuthCredentialStore.purgeLegacyIdentityToken()`
 /// 每次启动还在清那份旧的。

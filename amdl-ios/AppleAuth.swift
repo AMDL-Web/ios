@@ -8,7 +8,8 @@ import Foundation
 /// `--skip-jwt-bearer-tokens`，会用 Apple 公钥自己验签）。
 ///
 /// 中间有一版不是这样：`amdl-portal` 用 identity token 换一对自己的
-/// access/refresh，为的是绕开"identity token 只活约 10 分钟且无法静默续期"。
+/// access/refresh，为的是绕开"identity token 无法静默续期"（当时以为它只活十分钟，
+/// 实际约一天，见 `GatewayCredential`）。
 /// 整套系统改回单用户设计时门户被删了，这条路也就跟着回到了直发 —— 连带那个
 /// 每隔十几分钟弹一次面板的代价。取舍的完整说明在 `GatewayCredential` 的注释里。
 ///
@@ -72,7 +73,7 @@ enum AppleAuthCredentialStore {
 
     /// 清掉旧版本留在明文 plist 里的 Apple identity token。
     ///
-    /// 每次启动都跑一次，代价是两次 `removeObject`。它早就失效了（10 分钟寿命），
+    /// 每次启动都跑一次，代价是两次 `removeObject`。它早就失效了，
     /// 所以这不是功能问题；但一份用户凭据留在会进备份的明文文件里，删掉才对。
     static func purgeLegacyIdentityToken() {
         defaults?.removeObject(forKey: legacyTokenKey)
@@ -146,7 +147,7 @@ enum AppleAuthError: LocalizedError {
 /// 那个 token 本身就是发给网关的凭据。
 ///
 /// 中间有一版是两步 —— 第二步拿 identity token 去 `POST /api/gw/auth/apple/native`
-/// 换门户的 access/refresh。那一步是为了绕开 identity token 只活十分钟这件事；
+/// 换门户的 access/refresh。那一步是为了绕开 identity token 无法续期这件事；
 /// 门户删掉之后它没有了，代价见 `GatewayCredential`。
 @MainActor
 @Observable
