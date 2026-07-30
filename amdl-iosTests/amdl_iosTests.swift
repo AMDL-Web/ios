@@ -1091,6 +1091,40 @@ struct amdl_iosTests {
         )
     }
 
+    /// 通知里的 Emby 链接来自推送负载，所以它是外部输入。只认 emby 这一个
+    /// scheme —— 照单全收就等于让任何能发到这台设备的推送指定一个要打开的 URL。
+    @Test func embyDeepLinkAcceptsOnlyTheEmbyScheme() throws {
+        let good = try #require(AppDelegate.embyDeepLink(
+            fromNotificationUserInfo: ["emby_deep_link": "emby://items?serverId=srv-1&itemId=item-42"]
+        ))
+        try assert(good.scheme == "emby", "emby scheme is accepted")
+        try assert(good.absoluteString.contains("itemId=item-42"), "item id survives")
+
+        for rejected in [
+            "https://evil.example/steal",
+            "javascript:alert(1)",
+            "amdl://download/job_1",
+            "   ",
+            "",
+        ] {
+            try assert(
+                AppDelegate.embyDeepLink(fromNotificationUserInfo: ["emby_deep_link": rejected]) == nil,
+                "rejects \(rejected)"
+            )
+        }
+
+        // 没有这个键就是常态：非专辑任务、没配 Emby、扫描没跟上都走这一支。
+        try assert(
+            AppDelegate.embyDeepLink(fromNotificationUserInfo: ["job_id": "job_1"]) == nil,
+            "absent key is not an error"
+        )
+        // 退回路由的依据必须还在。
+        try assert(
+            AppDelegate.jobID(fromNotificationUserInfo: ["job_id": "job_1"]) == "job_1",
+            "job_id still routes in-app"
+        )
+    }
+
     private func assert(_ condition: Bool, _ message: String) throws {
         if !condition {
             throw TestFailure(message: message)

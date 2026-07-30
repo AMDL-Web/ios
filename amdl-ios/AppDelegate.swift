@@ -117,10 +117,41 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) async {
         let userInfo = response.notification.request.content.userInfo
         print("[Push] 用户点击通知: \(userInfo)")
+
+        // 专辑下完之后网关会先刷新 Emby、拿到媒体 ID 再发这条推送，所以带链接
+        // 就说明那张专辑此刻在 Emby 里确实点得开，直接过去。
+        //
+        // 拿不到链接的情况都退回应用内详情页，而且这几种情况一点都不罕见：非专辑
+        // 任务、没配 Emby、扫描还没跑到、或者匹配不上。装没装 Emby 也一样 —— open
+        // 的回调告诉我们打不开，再退回来。
+        if let embyURL = Self.embyDeepLink(fromNotificationUserInfo: userInfo) {
+            let opened = await UIApplication.shared.open(embyURL)
+            if opened { return }
+            print("[Push] Emby 打不开（多半是没装），退回应用内详情页")
+        }
+
         guard let jobID = Self.jobID(fromNotificationUserInfo: userInfo) else { return }
         // 只登记目标，导航由 ContentView 做：这个回调在冷启动时比根视图还早，
         // 直接推路径没人接得住。
         PendingDownloadRoute.shared.route(toJob: jobID)
+    }
+
+    /// 网关在专辑任务完成时放进 payload 的 `emby_deep_link`
+    /// （amdl-ios-gateway `alertPayload`），形如
+    /// `emby://items?serverId=<id>&itemId=<id>`。
+    ///
+    /// 只认 `emby` 这一个 scheme：这个值来自推送负载，照单全收就等于让任何能发到
+    /// 这台设备的推送指定一个要打开的 URL。
+    static func embyDeepLink(fromNotificationUserInfo userInfo: [AnyHashable: Any]) -> URL? {
+        guard let raw = userInfo["emby_deep_link"] as? String else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let url = URL(string: trimmed),
+              url.scheme?.lowercased() == "emby"
+        else {
+            return nil
+        }
+        return url
     }
 
     /// 网关的完成通知在 payload 顶层带 `job_id`（amdl-ios-gateway `alertPayload`），
