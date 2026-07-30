@@ -29,12 +29,13 @@ struct amdl_iosApp: App {
         WindowGroup {
             ContentView()
                 .task {
-                    // 启动时问一次门户"我现在是什么状态"。`GET /api/gw/me` 是
-                    // pending 账号唯一调得通的接口，所以这是 App 在用户动手之前
-                    // 就能知道"登录成功了但还没被批准"的唯一途径——否则用户要等到
-                    // 第一次提交下载失败，才从一个 403 里去猜发生了什么。
-                    guard AppleAuthStore.shared.isSignedIn else { return }
-                    await AppleAuthStore.shared.refreshAccountStatus()
+                    // 启动时对一遍界面和存储：凭据可能在 App 没运行的时候过期了。
+                    //
+                    // 这里以前问的是门户"我这个账号被批准了没有"。没有账号可问了，
+                    // 但**有一件事必须在用户动手之前知道**：手上这份 token 还能不能
+                    // 用。它只活约十分钟，所以"上次用还好好的"完全不说明问题，而
+                    // 没有这一下，用户会在第一次提交下载失败时才发现要重新登录。
+                    AppleAuthStore.shared.refreshFromStore()
                 }
         }
         .modelContainer(sharedModelContainer)

@@ -199,7 +199,7 @@ enum ConfigAPI {
         guard let url = try? makeURL(path: "/api/v1/developer-token") else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        guard let (_, httpResponse) = try? await PortalHTTP.send(request) else {
+        guard let (_, httpResponse) = try? await GatewayHTTP.send(request) else {
             return false
         }
         return httpResponse.statusCode == 200
@@ -218,10 +218,12 @@ enum ConfigAPI {
     }
 
     private static func send(_ request: URLRequest) async throws -> ConfigResponse {
-        // 走 PortalHTTP：它续 token、401 后重试一次，并把 403 的 pending_approval
-        // 翻成人话。这两个端点在门户策略表里是 **admin only**，所以普通用户会拿到
-        // 403 forbidden——那是正确行为，不是 bug。
-        let (data, httpResponse) = try await PortalHTTP.send(request)
+        // 走 GatewayHTTP：它负责带上凭据，并把 401 翻成"要重新登录"。
+        //
+        // 这两个端点以前在门户策略表里是 **admin only**，普通用户拿 403 是正确
+        // 行为。现在没有角色了，签了名就能改——这是进程级的配置，而进程是这一个
+        // 人的。
+        let (data, httpResponse) = try await GatewayHTTP.send(request)
         guard httpResponse.statusCode == 200 else {
             throw DownloadsAPI.serverError(status: httpResponse.statusCode, data: data)
         }

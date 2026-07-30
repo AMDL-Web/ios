@@ -103,7 +103,7 @@ enum LiveActivityGatewayAPI {
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        let (data, httpResponse) = try await PortalHTTP.send(request)
+        let (data, httpResponse) = try await GatewayHTTP.send(request)
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw LiveActivityGatewayError.server(httpResponse.statusCode)
         }
@@ -119,10 +119,10 @@ enum LiveActivityGatewayAPI {
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
-        // 必须走 PortalHTTP：门户是这条路唯一的入口（`/apns/*` 转发给
+        // 必须走 GatewayHTTP：门户是这条路唯一的入口（`/apns/*` 转发给
         // amdl-ios-gateway），而且它靠请求上的会话来断言这台设备属于谁——
         // 没有凭据就注册不上，注册不上就再也收不到实时活动，而且**没有任何报错**。
-        let (_, httpResponse) = try await PortalHTTP.send(request)
+        let (_, httpResponse) = try await GatewayHTTP.send(request)
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw LiveActivityGatewayError.server(httpResponse.statusCode)
         }

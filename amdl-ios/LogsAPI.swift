@@ -225,7 +225,7 @@ enum LogsAPI {
 
         // 门户策略表把 /api/v1/logs 标成 admin only（它带着每个租户的输入 URL），
         // 所以普通用户在这里拿到 403 forbidden 是设计如此。
-        let (data, httpResponse) = try await PortalHTTP.send(request)
+        let (data, httpResponse) = try await GatewayHTTP.send(request)
         guard httpResponse.statusCode == 200 else {
             throw DownloadsAPI.serverError(status: httpResponse.statusCode, data: data)
         }

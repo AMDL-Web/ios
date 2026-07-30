@@ -946,7 +946,7 @@ enum DownloadsAPI {
     /// 归属和配额，`/api/v1/*` 是它对后端的镜像（形状逐字节兼容，所以下面那些
     /// Codable 结构一个都不用改），`/api/gw/*` 是它自己的接口。
     ///
-    /// 所有 /api 请求都要带门户签发的 Bearer 令牌，见 `PortalAuth.swift`。
+    /// 所有 /api 请求都要带 Apple 的 identity token 作 Bearer，见 `GatewayAuth.swift`。
     /// 仍然可以在「配置 → 调试」里改成别的地址。
     ///
     /// 具体的值和存取都在 `BackendEndpoint` 里 —— 门户是唯一的源站，所以全 App
@@ -1010,7 +1010,7 @@ enum DownloadsAPI {
             )
         )
 
-        let (data, httpResponse) = try await PortalHTTP.send(request)
+        let (data, httpResponse) = try await GatewayHTTP.send(request)
         // 202 和 422 都要解 body：**422 才是配额被拒时唯一带着逐条原因的响应**。
         // 门户把每个 URL 的拒绝理由塞在 `results[].status/error` 里，整批被拒时
         // 它必须答 422 而不是 4xx 里的别的码——因为这里只对这两个码解码，别的码
@@ -1051,7 +1051,7 @@ enum DownloadsAPI {
         var request = URLRequest(url: url)
         request.httpMethod = method
 
-        let (data, httpResponse) = try await PortalHTTP.send(request)
+        let (data, httpResponse) = try await GatewayHTTP.send(request)
         guard httpResponse.statusCode == expecting else {
             throw serverError(status: httpResponse.statusCode, data: data)
         }
@@ -1131,11 +1131,10 @@ enum DownloadsAPI {
         return url
     }
 
-    /// 通过 `PortalHTTP` 而不是 `URLSession.shared` 直接发：那一层负责在发之前续
-    /// 快过期的 access token，并在 401 之后刷新一次、重试一次。它还会把 403 的
-    /// `pending_approval` / `suspended` 翻成人话抛出来。
+    /// 通过 `GatewayHTTP` 而不是 `URLSession.shared` 直接发：那一层负责在发之前
+    /// 把凭据带上，并把 401 翻成 `needsSignIn`。
     private static func fetchData(from url: URL) async throws -> Data {
-        let (data, httpResponse) = try await PortalHTTP.send(URLRequest(url: url))
+        let (data, httpResponse) = try await GatewayHTTP.send(URLRequest(url: url))
 
         guard httpResponse.statusCode == 200 else {
             throw serverError(status: httpResponse.statusCode, data: data)
@@ -1144,13 +1143,12 @@ enum DownloadsAPI {
         return data
     }
 
-    /// 把镜像面的错误体翻成一个能给用户看的错误。
+    /// 把错误体翻成一个能给用户看的错误。
     ///
-    /// `/api/v1/*` 的错误保持 amdl-backend 的 `{"error":...}` 形状，所以
-    /// `pending_approval` 是从 `error` 字段里读出来的，不是 problem+json 的 `code`。
-    /// 两边的值域是同一张表（DESIGN.md §6.3），一个客户端只需要一份码表。
+    /// `/api/v1/*` 就是 amdl-backend 自己的 `{"error":...}`，网关的 401 特意也用
+    /// 同一个形状，所以一份解码器管两边。
     static func serverError(status: Int, data: Data) -> Error {
-        let body = PortalErrorBody.decode(from: data)
+        let body = GatewayErrorBody.decode(from: data)
         if let mapped = body?.authError(status: status) {
             return mapped
         }

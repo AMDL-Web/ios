@@ -271,25 +271,24 @@ final class ShareViewController: UIViewController {
         throw ShareSubmissionError.missingURL
     }
 
-    /// 主 App 换来的门户 access token，门户拿它做认证。
+    /// 主 App 存下的 Apple identity token，网关拿它做认证。
     ///
-    /// 从 App Group 的 UserDefaults 搬到了 **Keychain**：以前存的是 Apple 的
-    /// identity token，10 分钟就废，明文放着风险有限；现在存的是门户会话，
-    /// refresh token 有 60 天寿命，不该躺在会进备份的明文 plist 里。
+    /// 存在 **Keychain**，不在 App Group 的 UserDefaults 里。这个 token 只活约十
+    /// 分钟，明文放着风险有限 —— 但把它明文写进会进备份的 plist 正是早先版本被专门
+    /// 修掉的问题，门户没了不是退回去的理由。
     ///
-    /// `PortalCredentialStore` 在主 App target 里，扩展够不着（共享的只有
-    /// `LiveActivityShared/`），所以这里是它的一份手抄，**四个常量必须和它逐字
-    /// 一致**（service / account / access group）。access group 已经改成引用
-    /// `BackendEndpoint.appGroupIdentifier`，剩下三个还是字面量。
-    /// access group 用的是 App Group id——iOS 允许这么用，所以扩展读得到，而且
-    /// 不需要新增任何 entitlement。
+    /// `GatewayCredentialStore` 在主 App target 里，扩展够不着（共享的只有
+    /// `LiveActivityShared/`），所以这里是它的一份手抄，**三个常量必须和它逐字
+    /// 一致**（service / account / access group）。access group 引用
+    /// `BackendEndpoint.appGroupIdentifier`；iOS 允许拿 App Group id 当 keychain
+    /// access group，所以扩展读得到，而且不需要新增任何 entitlement。
     ///
-    /// 扩展**不做刷新**：它是个一闪而过的浮层，转 token 是主 App 的事。access
-    /// token 过期时这里返回它、请求拿到 401，用户回主 App 打开一次就好了。
-    private static func portalBearerToken() -> String? {
+    /// 扩展**不做任何续期**，主 App 也不做 —— 没有可续的东西。token 过期时这里
+    /// 返回 nil、请求拿到 401，用户回主 App 重新登录一次。
+    private static func gatewayBearerToken() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.lyjw131.amdl.portal",
+            kSecAttrService as String: "com.lyjw131.amdl.gateway",
             kSecAttrAccount as String: "session",
             kSecAttrAccessGroup as String: BackendEndpoint.appGroupIdentifier,
             kSecReturnData as String: true,
@@ -298,23 +297,27 @@ final class ShareViewController: UIViewController {
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data,
-              let stored = try? JSONDecoder().decode(StoredCredentials.self, from: data),
-              !stored.accessToken.isEmpty
+              let stored = try? JSONDecoder().decode(StoredCredential.self, from: data),
+              !stored.identityToken.isEmpty,
+              // 过期的凭据不如不带：带着它去只会拿一个 401，不带至少让 401 的原因
+              // 只有一个。判断和 `GatewayCredential.isUsable` 一致。
+              stored.expiresAt.timeIntervalSinceNow > 30
         else { return nil }
-        return stored.accessToken
+        return stored.identityToken
     }
 
-    /// `PortalCredentials` 的解码镜像。字段名必须一致。
-    private struct StoredCredentials: Decodable {
-        let accessToken: String
+    /// `GatewayCredential` 的解码镜像。字段名必须一致。
+    private struct StoredCredential: Decodable {
+        let identityToken: String
+        let expiresAt: Date
     }
 
     private static func authorized(_ request: inout URLRequest) {
-        guard let token = portalBearerToken() else { return }
+        guard let token = gatewayBearerToken() else { return }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
-    /// 门户地址从 `BackendEndpoint` 取，和主 App 是同一份代码、同一个 App Group
+    /// 后端地址从 `BackendEndpoint` 取，和主 App 是同一份代码、同一个 App Group
     /// 键。以前这里自己抄了一份默认地址和键名，主 App 改了地址而这边没跟上时，
     /// 分享面板会一直往旧域名提交。
     private func backendBaseURL() throws -> URL {

@@ -1173,7 +1173,7 @@ struct amdl_iosTests {
 // MARK: - amdl-portal 会话（Milestone 7）
 
 @MainActor
-struct PortalAuthTests {
+struct GatewayAuthTests {
 
     /// 三条链路只剩一个可配置的地址。
     ///
@@ -1349,84 +1349,97 @@ struct PortalAuthTests {
         #expect(!AppleAuthCredentialStore.isGatewayHost("\(host).evil.example"))
     }
 
-    /// 两种错误体形状、同一张码表（DESIGN.md §6.3）。
-    ///
-    /// `/api/gw/*` 是 problem+json，机器码在 `code`；`/api/v1/*` 保持后端的
-    /// `{"error":...}`。客户端只该有一份码表，所以两种都得解得出同一个结论。
-    @Test func pendingApprovalIsRecognisedInBothErrorShapes() throws {
-        let problemJSON = Data(#"""
-        {"type":"about:blank","title":"Forbidden","status":403,
-         "detail":"this account is awaiting approval","code":"pending_approval"}
-        """#.utf8)
-        let mirrorJSON = Data(#"{"error":"pending_approval"}"#.utf8)
-
-        for body in [problemJSON, mirrorJSON] {
-            let decoded = try #require(PortalErrorBody.decode(from: body))
-            #expect(decoded.resolvedCode == "pending_approval")
-            guard case .pendingApproval = try #require(decoded.authError(status: 403)) else {
-                Issue.record("403 pending_approval 没有被识别出来")
-                return
-            }
+    /// 401 是唯一还带着"下一步该做什么"的拒绝，所以它必须被认出来，而不是变成
+    /// 一句「服务器错误 (401)」。网关的 401 body 特意用后端那个 `{"error":...}`
+    /// 形状，就是为了让客户端只需要一份解码器。
+    @Test func unauthenticatedIsRecognisedFromTheErrorBody() throws {
+        let decoded = try #require(
+            GatewayErrorBody.decode(from: Data(#"{"error":"unauthenticated"}"#.utf8))
+        )
+        #expect(decoded.resolvedCode == "unauthenticated")
+        guard case .needsSignIn = try #require(decoded.authError(status: 401)) else {
+            Issue.record("401 unauthenticated 没有被识别出来")
+            return
         }
-    }
-
-    /// 「等待批准」必须是一句人话。**每个新用户第一次进来看到的就是它**：门户给
-    /// pending 账号也发凭据（好让 App 能调 /api/gw/me 问出自己的状态），别的接口
-    /// 一律 403 —— 如果这里只剩「服务器错误 (403)」，用户唯一能得出的结论是登录坏了。
-    @Test func pendingApprovalHasAComprehensibleMessage() throws {
-        let message = try #require(PortalAuthError.pendingApproval.errorDescription)
-        #expect(message.contains("批准"))
-        #expect(!message.contains("403"))
-        #expect(!message.contains("error"))
-
-        // 停用和登录过期同理：都要说清楚下一步该做什么。
-        #expect(try #require(PortalAuthError.suspended.errorDescription).contains("停用"))
-        #expect(try #require(PortalAuthError.needsSignIn.errorDescription).contains("登录"))
     }
 
     /// 未知的错误码不许被当成认证问题吞掉——那会把一个真的服务器故障显示成
     /// 「请重新登录」，然后用户反复登录也没用。
     @Test func unknownCodesAreNotTreatedAsAuthErrors() throws {
-        let decoded = try #require(PortalErrorBody.decode(from: Data(#"{"error":"queue_full"}"#.utf8)))
+        let decoded = try #require(
+            GatewayErrorBody.decode(from: Data(#"{"error":"queue_full"}"#.utf8))
+        )
         #expect(decoded.authError(status: 422) == nil)
     }
 
-    /// access token 的可用性判断留了余量：卡着到期时刻发出去的请求会在路上过期，
-    /// 白跑一趟 401。
-    @Test func accessTokenNeedsHeadroomBeforeExpiry() {
-        let almostExpired = PortalCredentials(
-            accessToken: "a", refreshToken: "r",
-            accessTokenExpiresAt: Date().addingTimeInterval(30)
-        )
-        let fresh = PortalCredentials(
-            accessToken: "a", refreshToken: "r",
-            accessTokenExpiresAt: Date().addingTimeInterval(3600)
-        )
-        #expect(!almostExpired.isAccessTokenUsable)
-        #expect(fresh.isAccessTokenUsable)
+    /// 「登录已过期」必须是一句人话，而且要说清楚下一步。**用户会经常看到它** ——
+    /// Apple 的 identity token 只活约十分钟且无法静默续期，所以过期是常态。
+    @Test func needsSignInHasAComprehensibleMessage() throws {
+        let message = try #require(GatewayAuthError.needsSignIn.errorDescription)
+        #expect(message.contains("登录"))
+        #expect(!message.contains("401"))
+        #expect(!message.contains("error"))
     }
 
-    /// 凭据的编码形状是**跨 target 的契约**：`PortalCredentialStore` 在主 App
-    /// target 里，分享扩展够不着（共享的只有 `LiveActivityShared/`），它自己手抄
-    /// 了一份解码器，只认 `accessToken` 这个键。改字段名会让分享面板静默地不带令牌。
-    @Test func storedCredentialsKeepTheKeyNamesTheExtensionReads() throws {
-        let encoded = try JSONEncoder().encode(PortalCredentials(
-            accessToken: "token-value", refreshToken: "refresh-value",
-            accessTokenExpiresAt: Date()
-        ))
+    /// 凭据的到期时刻是从 token 自己的 `exp` claim 解出来的，不是"收到时间 + 十分钟"。
+    /// 十分钟是实测值不是契约；Apple 改了寿命而这里还按十分钟算，就会带着一个已经
+    /// 失效的凭据出门。
+    @Test func expiryComesFromTheTokenNotTheClock() throws {
+        // exp = 2026-07-30T12:00:00Z。header 和签名都是占位符：这里只解 payload，
+        // 验签是网关的事。
+        let exp = 1_785_585_600.0
+        let payload = try JSONSerialization.data(withJSONObject: ["exp": exp, "aud": "com.example.app"])
+        let base64url = payload.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let token = "eyJhbGciOiJSUzI1NiJ9.\(base64url).signature"
+
+        let parsed = try #require(GatewayCredential.expiry(ofJWT: token))
+        #expect(abs(parsed.timeIntervalSince1970 - exp) < 1)
+    }
+
+    /// 解不出 `exp` 时按十分钟兜底，而不是当成"永不过期"。一个不会过期的凭据会让
+    /// App 永远不提示重新登录，而每个请求都 401。
+    @Test func unparsableTokenFallsBackToTenMinutes() {
+        let received = Date()
+        for junk in ["", "not-a-jwt", "a.b", "a.!!!.c"] {
+            let credential = GatewayCredential(identityToken: junk, receivedAt: received)
+            #expect(abs(credential.expiresAt.timeIntervalSince(received) - 600) < 1)
+        }
+    }
+
+    /// 可用性判断留了余量：卡着到期时刻发出去的请求会在路上过期，白跑一趟 401。
+    @Test func credentialNeedsHeadroomBeforeExpiry() {
+        // 直接构造，绕开 init 里的 JWT 解析 —— 这里测的是余量，不是解析。
+        let almostExpired = GatewayCredential(identityToken: "x", receivedAt: Date().addingTimeInterval(-590))
+        let fresh = GatewayCredential(identityToken: "x", receivedAt: Date())
+        #expect(!almostExpired.isUsable)
+        #expect(fresh.isUsable)
+    }
+
+    /// 凭据的编码形状是**跨 target 的契约**：`GatewayCredentialStore` 在主 App
+    /// target 里，分享扩展够不着（共享的只有 `LiveActivityShared/`），它自己手抄了
+    /// 一份解码器，只认 `identityToken` 和 `expiresAt` 这两个键。改字段名会让分享
+    /// 面板静默地不带令牌 —— 提交会 401，而分享面板是个一闪而过的浮层，最难查。
+    @Test func storedCredentialKeepsTheKeyNamesTheExtensionReads() throws {
+        let encoded = try JSONEncoder().encode(GatewayCredential(identityToken: "token-value"))
         let object = try #require(
             try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
-        #expect(object["accessToken"] as? String == "token-value")
-        #expect(object["refreshToken"] as? String == "refresh-value")
+        #expect(object["identityToken"] as? String == "token-value")
+        #expect(object["expiresAt"] != nil)
+        // 扩展用默认的 JSONDecoder 解 `expiresAt`，所以编码策略必须是默认的
+        // .deferredToDate（自参考日期起的秒数），不能是 ISO8601 字符串。
+        #expect(object["expiresAt"] is Double)
     }
 
     /// Keychain 的 access group 用的是 App Group id。四个 target 的 entitlements
     /// 里已经都有它，所以共享凭据**不需要新增任何 entitlement**——这一点值得钉住，
     /// 因为改 entitlement 要重新配 provisioning。
     @Test func keychainAccessGroupIsTheExistingAppGroup() {
-        #expect(PortalCredentialStore.accessGroup == DownloadsAPI.appGroupIdentifier)
-        #expect(PortalCredentialStore.accessGroup == "group.com.lyjw131.amdl.amdl-ios")
+        #expect(GatewayCredentialStore.accessGroup == DownloadsAPI.appGroupIdentifier)
+        #expect(GatewayCredentialStore.accessGroup == "group.com.lyjw131.amdl.amdl-ios")
     }
 
 }
@@ -1553,12 +1566,12 @@ struct JobActionTests {
 
     /// 认证类错误本来就有人话，不许被动作层的措辞盖掉。
     @Test func authErrorsPassThroughTheActionMapper() throws {
-        let mapped = JobActionError.mapping(PortalAuthError.pendingApproval, action: .delete)
-        guard case PortalAuthError.pendingApproval = mapped else {
+        let mapped = JobActionError.mapping(GatewayAuthError.needsSignIn, action: .delete)
+        guard case GatewayAuthError.needsSignIn = mapped else {
             Issue.record("认证错误被动作层改写了：\(mapped)")
             return
         }
-        #expect(mapped.localizedDescription.contains("等待管理员批准"))
+        #expect(mapped.localizedDescription.contains("重新"))
     }
 }
 

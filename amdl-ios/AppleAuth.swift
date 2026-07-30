@@ -3,18 +3,17 @@ import Foundation
 
 /// 「通过 Apple 登录」的**身份**部分：这个设备上登录的是谁。
 ///
-/// 认证凭据本身不在这里了。以前 App 把 Apple 的 identity token 直接当
-/// `Authorization: Bearer` 发给 oauth2-proxy（它开了 `--skip-jwt-bearer-tokens`，
-/// 会用 Apple 公钥自己验签）。换成 `amdl-portal` 之后不是这样：identity token 只
-/// 用来**换一次**门户自己的会话，之后所有请求带的是门户签发的 access token，见
-/// `PortalAuth.swift`。
+/// 认证凭据本身在 `GatewayAuth.swift`。凭据就是 Apple 的 identity token 本身，
+/// 直接当 `Authorization: Bearer` 发给网关的 oauth2-proxy（它开了
+/// `--skip-jwt-bearer-tokens`，会用 Apple 公钥自己验签）。
 ///
-/// 这不是重构，是修一个体验缺陷：Apple 的 identity token 实测只活约 10 分钟，
-/// 而且没有静默续期手段，所以旧方案下用户每隔十几分钟就得重新弹一次系统登录面板。
-/// 门户的 refresh token 是 60 天，App 因此可以连着用两个月不弹面板。
+/// 中间有一版不是这样：`amdl-portal` 用 identity token 换一对自己的
+/// access/refresh，为的是绕开"identity token 只活约 10 分钟且无法静默续期"。
+/// 整套系统改回单用户设计时门户被删了，这条路也就跟着回到了直发 —— 连带那个
+/// 每隔十几分钟弹一次面板的代价。取舍的完整说明在 `GatewayCredential` 的注释里。
 ///
 /// 留在 App Group 的 UserDefaults 里的只有用户 id 和邮箱——都是给界面显示"当前登录
-/// 的是谁"用的，不是凭据。**真正的凭据在 Keychain**（`PortalCredentialStore`）。
+/// 的是谁"用的，不是凭据。**真正的凭据在 Keychain**（`GatewayCredentialStore`）。
 enum AppleAuthCredentialStore {
     private static let userIDKey = "appleUserID"
     private static let emailKey = "appleUserEmail"
@@ -39,15 +38,16 @@ enum AppleAuthCredentialStore {
         set { defaults?.set(newValue, forKey: emailKey) }
     }
 
-    /// 门户会话的到期时刻，仅供界面显示。真正决定请求带不带凭据的是
-    /// `PortalSession`，它在快过期时会自己续，所以这里过期了也不代表要重新登录。
+    /// 凭据的到期时刻，供界面显示。**这次它是真的**：没有续期，过了就得重新登录，
+    /// 所以界面拿它倒计时是准的。门户时期它只是个装饰 —— 那时快过期会自动续。
     static var expiresAt: Date? {
-        PortalCredentialStore.load()?.accessTokenExpiresAt
+        GatewayCredentialStore.load()?.expiresAt
     }
 
-    /// 手上有没有一份**能续**的门户会话。access token 过期无所谓——refresh 还在就
-    /// 能续，而 refresh 有 60 天。
-    static var hasPortalSession: Bool { PortalCredentialStore.load() != nil }
+    /// 手上有没有一份**还能用**的凭据。
+    static var hasUsableCredential: Bool {
+        GatewayCredentialStore.load()?.isUsable ?? false
+    }
 
     static func store(userID: String, email: String?) {
         self.userID = userID
@@ -61,6 +61,13 @@ enum AppleAuthCredentialStore {
         defaults?.removeObject(forKey: userIDKey)
         defaults?.removeObject(forKey: emailKey)
         purgeLegacyIdentityToken()
+    }
+
+    /// 启动时跑一次的清理：明文 plist 里的旧 token，以及门户时期那份 60 天的
+    /// refresh token。两者签发方都已经不存在了。
+    static func purgeRetiredCredentials() {
+        purgeLegacyIdentityToken()
+        GatewayCredentialStore.purgePortalCredentials()
     }
 
     /// 清掉旧版本留在明文 plist 里的 Apple identity token。
@@ -86,36 +93,32 @@ extension AppleAuthCredentialStore {
 }
 
 extension URLRequest {
-    /// 带上门户的认证头，**同步**版本：只读 Keychain 里现成的 access token，
-    /// 不做刷新。目标不是门户域名时什么都不加。
+    /// 带上网关的认证头。目标不是网关域名时什么都不加。
     ///
-    /// 需要刷新和 401 重试的请求走 `PortalHTTP.send`。这个同步版本留给两类调用方：
-    /// 封面图这种"401 了也就是少一张图"的请求，以及 WebSocket——
-    /// `URLSessionWebSocketTask` 的握手头必须在创建任务时就定下来，没有异步的余地。
-    mutating func authorizeWithPortal() {
+    /// 门户时期这里还有个"同步 / 异步"的区分：异步版本要能刷新 token，同步版本
+    /// 只读现成的。**没有刷新之后两者是同一件事**，所以只剩这一个。
+    mutating func authorizeForGateway() {
         guard AppleAuthCredentialStore.isGatewayHost(url?.host()) else { return }
-        setBearer(PortalCredentialStore.load()?.accessToken)
+        setBearer(GatewaySession.bearerToken())
     }
 
     init(authorizedURL url: URL) {
         self.init(url: url)
-        authorizeWithPortal()
+        authorizeForGateway()
     }
 }
 
 extension URLSession {
-    /// WebSocket 也要过门户认证，所以不能用 `webSocketTask(with: URL)`——
+    /// WebSocket 也要过网关认证，所以不能用 `webSocketTask(with: URL)`——
     /// 那个重载没法带自定义头。
     ///
-    /// **async 的原因**：握手头在建任务的那一刻就定死了，之后没有"401 了再刷一次
-    /// 重试"的机会——`URLSessionWebSocketTask` 只会失败，调用方看到的是一次断线，
-    /// 然后重连、再断线。所以刷新必须发生在握手**之前**。App 在后台待过一小时
-    /// 之后回到前台的第一次重连就是这条路径。
-    func authorizedWebSocketTask(with url: URL) async -> URLSessionWebSocketTask {
+    /// 握手头在建任务的那一刻就定死了，之后没有补救机会——`URLSessionWebSocketTask`
+    /// 只会失败，调用方看到的是一次断线，然后重连、再断线。凭据过期时这条路径就是
+    /// 这个样子，而且**没有办法在这一层修**：唯一能给出新 token 的是系统登录面板。
+    /// 所以断线重连若持续失败，界面要引导用户重新登录，而不是继续重连。
+    func authorizedWebSocketTask(with url: URL) -> URLSessionWebSocketTask {
         var request = URLRequest(url: url)
-        if AppleAuthCredentialStore.isGatewayHost(url.host()) {
-            request.setBearer(await PortalSession.shared.accessToken())
-        }
+        request.authorizeForGateway()
         return webSocketTask(with: request)
     }
 }
@@ -139,10 +142,12 @@ enum AppleAuthError: LocalizedError {
 
 /// 登录状态，供界面观察。
 ///
-/// 登录是**两步**，而且第二步才是重点：先让系统弹面板拿 Apple 的 identity token，
-/// 再拿它去 `POST /api/gw/auth/apple/native` 换门户的会话。identity token 只活约
-/// 10 分钟且无法静默续期，门户的 refresh token 是 60 天并且每次刷新都轮换——
-/// 换取这一步就是 App 能连着用两个月不弹面板的全部原因。
+/// 登录是**一步**：让系统弹面板，把拿到的 identity token 存进 Keychain，完事。
+/// 那个 token 本身就是发给网关的凭据。
+///
+/// 中间有一版是两步 —— 第二步拿 identity token 去 `POST /api/gw/auth/apple/native`
+/// 换门户的 access/refresh。那一步是为了绕开 identity token 只活十分钟这件事；
+/// 门户删掉之后它没有了，代价见 `GatewayCredential`。
 @MainActor
 @Observable
 final class AppleAuthStore {
@@ -152,10 +157,6 @@ final class AppleAuthStore {
     private(set) var email: String?
     private(set) var expiresAt: Date?
     private(set) var isSigningIn = false
-    /// 账号还没被管理员批准。**每个新用户第一次登录看到的都是这个状态**，界面必须
-    /// 说人话而不是弹一个 403。登录本身是成功的：门户给 pending 账号也发凭据，
-    /// 好让 App 能调 `/api/gw/me` 问出自己是 pending（DESIGN.md §6.2）。
-    private(set) var isPendingApproval = false
 
     private var controllerBox: SignInController?
 
@@ -163,15 +164,19 @@ final class AppleAuthStore {
         userID = AppleAuthCredentialStore.userID
         email = AppleAuthCredentialStore.email
         expiresAt = AppleAuthCredentialStore.expiresAt
-        // 顺手清掉旧版本明文存下的 Apple identity token。
-        AppleAuthCredentialStore.purgeLegacyIdentityToken()
+        // 明文 plist 里的旧 token，以及门户那份 60 天的 refresh token。
+        AppleAuthCredentialStore.purgeRetiredCredentials()
     }
 
-    /// 登录过且没有登出。access token 可能已过期，但 refresh 还在就不用管。
-    var isSignedIn: Bool { userID != nil && AppleAuthCredentialStore.hasPortalSession }
+    /// 登录过且手上的凭据还没过期。
+    ///
+    /// **和门户时期不是一个意思**：那时凭据过期只要 refresh 还在就能续，所以
+    /// `isSignedIn` 只看"登录过没有"。现在过期就是真的要重新登录了，所以这里必须
+    /// 把有效性一起算进去 —— 否则界面会一直显示已登录，而每个请求都是 401。
+    var isSignedIn: Bool { userID != nil && AppleAuthCredentialStore.hasUsableCredential }
 
-    /// 手上有一份门户会话。
-    var hasValidToken: Bool { AppleAuthCredentialStore.hasPortalSession }
+    /// 手上有一份还能用的凭据。
+    var hasValidToken: Bool { AppleAuthCredentialStore.hasUsableCredential }
 
     func signIn() async throws {
         isSigningIn = true
@@ -192,39 +197,22 @@ final class AppleAuthStore {
             throw AppleAuthError.missingIdentityToken
         }
 
-        // authorizationCode 门户目前收下但不用（DESIGN.md §6.2），照发即可——
-        // 将来门户要用它去 Apple 查询 Apple ID 是否被撤销时，不需要 App 再发版。
-        let authorizationCode = credential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) }
-        _ = try await PortalSession.shared.exchange(
-            identityToken: identityToken,
-            authorizationCode: authorizationCode,
-            fullName: credential.fullName?.formatted()
-        )
+        // credential.authorizationCode 不再发给任何人：它是用来在服务端跟 Apple
+        // 换 refresh token 的，而现在没有服务端会话可换。
+        GatewaySession.store(identityToken: identityToken)
 
         AppleAuthCredentialStore.store(userID: credential.user, email: credential.email)
         userID = AppleAuthCredentialStore.userID
         email = AppleAuthCredentialStore.email
         expiresAt = AppleAuthCredentialStore.expiresAt
-        await refreshAccountStatus()
     }
 
     func signOut() {
         AppleAuthCredentialStore.clear()
-        Task { await PortalSession.shared.signOut() }
+        GatewaySession.signOut()
         userID = nil
         email = nil
         expiresAt = nil
-        isPendingApproval = false
-    }
-
-    /// 问一次门户"我现在是什么状态"。
-    ///
-    /// `GET /api/gw/me` 是 pending 账号**唯一**能调通的接口，所以它是 App 判断
-    /// "登录成功但还不能用"的唯一途径——别的接口一律 403，从状态码上分不出
-    /// "没批准"和"权限不够"。
-    func refreshAccountStatus() async {
-        guard let status = await PortalAccount.fetchStatus() else { return }
-        isPendingApproval = status == "pending"
     }
 
     /// 令牌过期后刷新界面用：重新读一遍存储里的过期时间。
@@ -232,32 +220,6 @@ final class AppleAuthStore {
         userID = AppleAuthCredentialStore.userID
         email = AppleAuthCredentialStore.email
         expiresAt = AppleAuthCredentialStore.expiresAt
-    }
-
-    /// 请求侧发现账号还没批准时回调，把状态推给界面。
-    func markPendingApproval() {
-        isPendingApproval = true
-    }
-}
-
-/// `GET /api/gw/me` 的最小解码：这一版只需要账号状态。
-enum PortalAccount {
-    static func fetchStatus() async -> String? {
-        guard !DownloadsAPI.baseURLString.isEmpty,
-              var components = URLComponents(string: DownloadsAPI.baseURLString)
-        else { return nil }
-        components.path = "/api/gw/me"
-        guard let url = components.url else { return nil }
-
-        struct Response: Decodable {
-            struct User: Decodable { let status: String }
-            let user: User
-        }
-        guard let (data, http) = try? await PortalHTTP.send(URLRequest(url: url)),
-              http.statusCode == 200,
-              let decoded = try? JSONDecoder().decode(Response.self, from: data)
-        else { return nil }
-        return decoded.user.status
     }
 }
 

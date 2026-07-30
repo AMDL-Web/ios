@@ -9,7 +9,7 @@ import Security
 /// 这也是 `AGENTS.md`「不要拿 MusicKit 去补任务里的空缺」在这里的具体形态：
 /// 缺的不是数据，是一个能取到数据的进程。
 ///
-/// **为什么存钥匙串而不是 App Group 的 UserDefaults**：和 `PortalCredentialStore`
+/// **为什么存钥匙串而不是 App Group 的 UserDefaults**：和 `GatewayCredentialStore`
 /// 同一个理由——这是一份能代表用户 Apple Music 账号的凭据，UserDefaults 的 plist
 /// 是明文、会进备份、也没有「解锁之后才可读」这种保护。
 ///
@@ -42,7 +42,7 @@ nonisolated struct SharedMediaUserToken: Codable, Sendable, Equatable {
 }
 
 nonisolated enum MediaUserTokenStore {
-    /// 与 `PortalCredentialStore.accessGroup` 是同一个组。这里引用
+    /// 与 `GatewayCredentialStore.accessGroup` 是同一个组。这里引用
     /// `BackendEndpoint.appGroupIdentifier`，因为这个文件本身就在
     /// `LiveActivityShared/` 里，两边看得见同一个常量。
     static let accessGroup = BackendEndpoint.appGroupIdentifier
@@ -86,7 +86,7 @@ nonisolated enum MediaUserTokenStore {
             SharedMediaUserToken(value: trimmed, updatedAt: updatedAt)
         ) else { return }
 
-        // 先删后写，同 `PortalCredentialStore.save`：`SecItemUpdate` 在条目不存在时
+        // 先删后写，同 `GatewayCredentialStore.save`：`SecItemUpdate` 在条目不存在时
         // 返回 errSecItemNotFound，分两条路径只是多一个分支。
         SecItemDelete(baseQuery as CFDictionary)
         var query = baseQuery

@@ -72,21 +72,22 @@ struct DebugView: View {
             } header: {
                 Text("门户")
             } footer: {
-                Text("整个 App 只有这一个地址：任务列表走 /api/v1，账号和配额走 /api/gw，实时活动走 /apns，都由它派生。修改后请重新启动 App，以向新地址注册实时活动 token。")
+                Text("整个 App 只有这一个地址：任务列表走 /api/v1，登录走 /oauth2，实时活动走 /apns，都由它派生。修改后请重新启动 App，以向新地址注册实时活动 token。")
             }
 
             Section {
                 if appleAuth.isSignedIn {
                     LabeledContent("账号", value: appleAuth.email ?? "已登录")
                     LabeledContent("会话", value: appleTokenStatusText)
-                    // 每个新账号第一次登录后都会停在这里等管理员点批准。这句话必须
-                    // 说清楚"登录是成功的、要等的是别人"，否则用户只会看见后面每个
-                    // 请求都 403，然后以为是自己登录失败了。
-                    if appleAuth.isPendingApproval {
+                    // 凭据是 Apple 的 identity token 本身，只活约十分钟，而且没有
+                    // 静默续期的办法。所以过期是**常态**而不是异常，界面必须直说
+                    // 一句，否则用户看到的只是"每隔一会儿就要重新登录一次"，像是
+                    // 坏了。取舍的来龙去脉见 GatewayCredential 的注释。
+                    if !appleAuth.hasValidToken {
                         Label {
-                            Text("账号正在等待管理员批准。批准之后不用重新登录，直接就能用。")
+                            Text("登录已过期，重新登录一次即可。Apple 的登录凭据只有约十分钟有效期，而且无法自动续期。")
                         } icon: {
-                            Image(systemName: "clock.badge.questionmark")
+                            Image(systemName: "clock.badge.exclamationmark")
                         }
                         .font(.footnote)
                         .foregroundStyle(.orange)
