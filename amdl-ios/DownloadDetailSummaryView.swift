@@ -9,7 +9,6 @@ struct DownloadSongDetailContent: View {
     let job: Job?
     let items: [JobItem]
     let progress: Double
-    var speed: TaskSpeedPresentation?
     let errorMessage: String?
     let palette: DownloadDetailPalette?
     @Binding var presentedQualityDetails: AudioQualityPresentation.Details?
@@ -30,7 +29,6 @@ struct DownloadSongDetailContent: View {
                             job: job,
                             items: items,
                             progress: progress,
-                            speed: speed,
                             albumTracksOmitSubtitles: false,
                             palette: palette,
                             presentedQualityDetails: $presentedQualityDetails
@@ -49,7 +47,6 @@ struct DownloadDetailSummaryView: View {
     let job: Job
     let items: [JobItem]
     let progress: Double
-    var speed: TaskSpeedPresentation?
     let albumTracksOmitSubtitles: Bool
     let palette: DownloadDetailPalette?
     @Binding var presentedQualityDetails: AudioQualityPresentation.Details?
@@ -170,12 +167,6 @@ struct DownloadDetailSummaryView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(palette?.secondaryText ?? Color.secondary)
 
-                if let speed, job.status.isActive {
-                    TaskSpeedReadout(
-                        speed: speed,
-                        color: palette?.secondaryText ?? Color.secondary
-                    )
-                }
             }
             .padding(.horizontal, 24)
             .padding(.top, 8)
@@ -284,6 +275,23 @@ struct DownloadDetailSummaryView: View {
     }
 }
 
+struct DownloadTaskSpeedView: View {
+    let speed: TaskSpeedPresentation
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                TaskSpeedReadout(speed: speed, color: .secondary)
+                    .padding(20)
+            }
+            .navigationTitle("实时速度")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+}
+
 private struct TaskSpeedReadout: View {
     let speed: TaskSpeedPresentation
     let color: Color
@@ -292,90 +300,243 @@ private struct TaskSpeedReadout: View {
     private let decryptColor = Color.orange
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 22) {
             HStack(spacing: 16) {
-                Label(
-                    "下载 \(TransferSpeedFormat.string(bytesPerSecond: speed.downloadBytesPerSecond))",
-                    systemImage: "arrow.down"
-                )
-                .foregroundStyle(downloadColor)
-                .accessibilityLabel(
-                    "下载速度 \(TransferSpeedFormat.string(bytesPerSecond: speed.downloadBytesPerSecond))"
+                speedMetric(
+                    title: "下载",
+                    value: TransferSpeedFormat.string(
+                        bytesPerSecond: speed.downloadBytesPerSecond
+                    ),
+                    countLabel: "正在下载曲目数",
+                    count: speed.downloadingItemCount,
+                    systemImage: "arrow.down",
+                    tint: downloadColor
                 )
 
-                Label(
-                    "解密 \(TransferSpeedFormat.string(bytesPerSecond: speed.decryptBytesPerSecond))",
-                    systemImage: "lock.open"
-                )
-                .foregroundStyle(decryptColor)
-                .accessibilityLabel(
-                    "解密速度 \(TransferSpeedFormat.string(bytesPerSecond: speed.decryptBytesPerSecond))"
+                Divider()
+                    .frame(height: 36)
+
+                speedMetric(
+                    title: "解密",
+                    value: TransferSpeedFormat.string(
+                        bytesPerSecond: speed.decryptBytesPerSecond
+                    ),
+                    countLabel: "正在解密曲目数",
+                    count: speed.decryptingItemCount,
+                    systemImage: "lock.open",
+                    tint: decryptColor
                 )
             }
 
-            TaskSpeedTrendChart(
-                points: speed.history,
-                downloadColor: downloadColor,
-                decryptColor: decryptColor
-            )
-                .frame(height: 44)
-                .accessibilityLabel("下载与解密速度变化趋势")
-                .accessibilityValue(
-                    "下载 \(TransferSpeedFormat.string(bytesPerSecond: speed.downloadBytesPerSecond))，"
-                        + "解密 \(TransferSpeedFormat.string(bytesPerSecond: speed.decryptBytesPerSecond))"
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("最近速度变化")
+                        .font(.caption)
+                        .fontWeight(.medium)
+
+                    Spacer()
+
+                    Text("MB/s")
+                        .font(.caption2.monospacedDigit())
+                }
+                .foregroundStyle(color)
+
+                SWTaskSpeedLineChart(
+                    points: speed.history,
+                    downloadColor: downloadColor,
+                    decryptColor: decryptColor,
+                    axisColor: color
                 )
+                    .frame(height: 190)
+                    .accessibilityLabel("下载与解密速度折线趋势")
+                    .accessibilityValue(
+                        "下载 \(TransferSpeedFormat.string(bytesPerSecond: speed.downloadBytesPerSecond))，"
+                            + "解密 \(TransferSpeedFormat.string(bytesPerSecond: speed.decryptBytesPerSecond))"
+                    )
+            }
         }
         .font(.caption.monospacedDigit())
         .foregroundStyle(color)
-        .padding(.top, 2)
+    }
+
+    private func speedMetric(
+        title: String,
+        value: String,
+        countLabel: String,
+        count: Int,
+        systemImage: String,
+        tint: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.caption.bold())
+                    .frame(width: 26, height: 26)
+                    .background(tint.opacity(0.12), in: Circle())
+
+                Text(title)
+                    .fontWeight(.semibold)
+                    .fixedSize(horizontal: true, vertical: false)
+
+                Text(value)
+                    .fontWeight(.semibold)
+                    .contentTransition(.numericText())
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+
+            HStack(spacing: 4) {
+                Text(countLabel)
+                Text(count, format: .number)
+                    .fontWeight(.semibold)
+                    .contentTransition(.numericText())
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title)速度 \(value)，\(countLabel) \(count)")
     }
 }
 
-private struct TaskSpeedTrendChart: View {
+/// 取自 ShipSwift 多序列折线图配方的紧凑任务趋势版本：下载和解密共用纵轴，
+/// 分别使用蓝、橙两条折线展示最近一段时间的速度变化。
+private struct SWTaskSpeedLineChart: View {
     let points: [TaskSpeedPoint]
     let downloadColor: Color
     let decryptColor: Color
+    let axisColor: Color
 
-    var body: some View {
-        Canvas { context, size in
-            let downloadValues = points.map(\.downloadBytesPerSecond)
-            let decryptValues = points.map(\.decryptBytesPerSecond)
-            guard points.count >= 2 else {
-                return
-            }
-            let maximum = max(downloadValues.max() ?? 0, decryptValues.max() ?? 0)
-            guard maximum > 0 else { return }
-
-            let horizontalStep = size.width / CGFloat(points.count - 1)
-            let topInset: CGFloat = 2
-            let chartHeight = max(size.height - topInset - 2, 1)
-
-            func line(for values: [Double]) -> Path {
-                let chartPoints = values.enumerated().map { index, value in
-                    CGPoint(
-                        x: CGFloat(index) * horizontalStep,
-                        y: topInset + chartHeight * (1 - value / maximum)
-                    )
-                }
-                var path = Path()
-                path.move(to: chartPoints[0])
-                for point in chartPoints.dropFirst() {
-                    path.addLine(to: point)
-                }
-                return path
-            }
-
-            context.stroke(
-                line(for: downloadValues),
-                with: .color(downloadColor),
-                style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
-            )
-            context.stroke(
-                line(for: decryptValues),
-                with: .color(decryptColor),
-                style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+    private var maximumMBps: Double {
+        let largest = points.reduce(0.0) {
+            max(
+                $0,
+                max(
+                    $1.downloadBytesPerSecond / 1_000_000,
+                    $1.decryptBytesPerSecond / 1_000_000
+                )
             )
         }
+        guard largest > 0 else { return 1 }
+        let magnitude = pow(10, floor(log10(largest)))
+        let normalized = largest / magnitude
+        let rounded: Double
+        switch normalized {
+        case ...1:
+            rounded = 1
+        case ...2:
+            rounded = 2
+        case ...5:
+            rounded = 5
+        default:
+            rounded = 10
+        }
+        return rounded * magnitude
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .trailing, spacing: 0) {
+                Text(axisLabel(maximumMBps))
+                Spacer()
+                Text(axisLabel(maximumMBps / 2))
+                Spacer()
+                Text("0.0")
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(axisColor.opacity(0.8))
+            .frame(width: 38)
+
+            Canvas { context, size in
+                for fraction in [0.0, 0.5, 1.0] {
+                    let y = size.height * (1 - fraction)
+                    var gridLine = Path()
+                    gridLine.move(to: CGPoint(x: 0, y: y))
+                    gridLine.addLine(to: CGPoint(x: size.width, y: y))
+                    context.stroke(
+                        gridLine,
+                        with: .color(axisColor.opacity(0.14)),
+                        lineWidth: 0.5
+                    )
+                }
+
+                guard !points.isEmpty else { return }
+                drawLine(
+                    values: points.map(\.downloadBytesPerSecond),
+                    maximum: maximumMBps,
+                    size: size,
+                    color: downloadColor,
+                    context: &context
+                )
+                drawLine(
+                    values: points.map(\.decryptBytesPerSecond),
+                    maximum: maximumMBps,
+                    size: size,
+                    color: decryptColor,
+                    context: &context
+                )
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: points)
+    }
+
+    private func axisLabel(_ value: Double) -> String {
+        String(
+            format: "%.1f",
+            locale: Locale(identifier: "en_US_POSIX"),
+            value
+        )
+    }
+
+    private func drawLine(
+        values: [Double],
+        maximum: Double,
+        size: CGSize,
+        color: Color,
+        context: inout GraphicsContext
+    ) {
+        guard !values.isEmpty, maximum > 0 else { return }
+        let step = values.count > 1
+            ? (size.width - 8) / CGFloat(values.count - 1)
+            : 0
+        let chartPoint: (Int, Double) -> CGPoint = { index, bytesPerSecond in
+            let megabytesPerSecond = bytesPerSecond / 1_000_000
+            return CGPoint(
+                x: values.count > 1 ? 4 + CGFloat(index) * step : size.width / 2,
+                y: 4 + (size.height - 8)
+                    * (1 - CGFloat(min(megabytesPerSecond / maximum, 1)))
+            )
+        }
+
+        var path = Path()
+        for (index, value) in values.enumerated() {
+            let point = chartPoint(index, value)
+            if index == 0 {
+                path.move(to: point)
+            } else {
+                path.addLine(to: point)
+            }
+        }
+        context.stroke(
+            path,
+            with: .color(color),
+            style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+        )
+
+        guard let lastValue = values.last else { return }
+        let lastPoint = chartPoint(values.count - 1, lastValue)
+        context.fill(
+            Path(ellipseIn: CGRect(
+                x: lastPoint.x - 2,
+                y: lastPoint.y - 2,
+                width: 4,
+                height: 4
+            )),
+            with: .color(color)
+        )
     }
 }
 

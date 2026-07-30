@@ -226,6 +226,8 @@ struct amdl_iosTests {
         )
         var tracker = TaskSpeedTracker()
         tracker.update(with: [downloading, decrypting])
+        try assert(tracker.presentation.downloadingItemCount == 0, "waiting download is not active")
+        try assert(tracker.presentation.decryptingItemCount == 0, "waiting decrypt is not active")
 
         downloading.progress.download = 0.2
         downloading.updatedAt = try #require(
@@ -244,6 +246,8 @@ struct amdl_iosTests {
             abs(tracker.presentation.decryptBytesPerSecond - 1_120_000) < 0.001,
             "aggregate decrypt speed"
         )
+        try assert(tracker.presentation.downloadingItemCount == 1, "downloading item count")
+        try assert(tracker.presentation.decryptingItemCount == 1, "decrypting item count")
         try assert(tracker.presentation.history.count == 2, "trend keeps both samples")
         try assert(
             tracker.presentation.history.last?.downloadBytesPerSecond
@@ -255,6 +259,43 @@ struct amdl_iosTests {
                 == tracker.presentation.decryptBytesPerSecond,
             "trend records current decrypt speed"
         )
+    }
+
+    @Test func transferSpeedFormatUsesFixedMegabytesAndOneDecimalPlace() {
+        #expect(TransferSpeedFormat.string(bytesPerSecond: 560_000) == "0.6 MB/s")
+        #expect(TransferSpeedFormat.string(bytesPerSecond: 12_340_000) == "12.3 MB/s")
+    }
+
+    @Test func taskSpeedTrackerUsesExplicitWaitingStatesForConcurrency() throws {
+        let waiting = try speedItem(
+            id: "waiting",
+            status: "waiting_download",
+            download: 0,
+            decrypt: 0,
+            updatedAt: "2026-07-29T00:00:00Z"
+        )
+        let downloading = try speedItem(
+            id: "downloading",
+            status: "downloading",
+            download: 0,
+            decrypt: 0,
+            updatedAt: "2026-07-29T00:00:00Z"
+        )
+        let decrypting = try speedItem(
+            id: "decrypting",
+            status: "decrypting",
+            download: 1,
+            decrypt: 0,
+            updatedAt: "2026-07-29T00:00:00Z"
+        )
+        var tracker = TaskSpeedTracker()
+        tracker.update(with: [waiting, downloading, decrypting])
+
+        #expect(waiting.status == .waitingDownload)
+        #expect(waiting.status.isActive)
+        #expect(waiting.status.text == "等待下载")
+        #expect(tracker.presentation.downloadingItemCount == 1)
+        #expect(tracker.presentation.decryptingItemCount == 1)
     }
 
     @Test func taskSpeedTrackerRejectsSubsecondPercentBurstSpikes() throws {

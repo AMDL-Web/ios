@@ -239,7 +239,9 @@ struct Job: Codable, Identifiable {
 enum JobItemStatus: String, Codable {
     case queued
     case resolving
+    case waitingDownload = "waiting_download"
     case downloading
+    case waitingDecrypt = "waiting_decrypt"
     case decrypting
     case remuxing
     case tagging
@@ -251,7 +253,8 @@ enum JobItemStatus: String, Codable {
 
     var isActive: Bool {
         switch self {
-        case .queued, .resolving, .downloading, .decrypting, .remuxing, .tagging, .saving:
+        case .queued, .resolving, .waitingDownload, .downloading,
+             .waitingDecrypt, .decrypting, .remuxing, .tagging, .saving:
             true
         case .completed, .failed, .skippedExisting, .cancelled:
             false
@@ -264,6 +267,8 @@ enum JobItemStatus: String, Codable {
             "clock"
         case .resolving:
             "magnifyingglass"
+        case .waitingDownload, .waitingDecrypt:
+            "hourglass"
         case .downloading:
             "arrow.down.circle.fill"
         case .decrypting:
@@ -289,6 +294,8 @@ enum JobItemStatus: String, Codable {
             .secondary
         case .resolving, .downloading, .decrypting, .remuxing, .tagging, .saving:
             .blue
+        case .waitingDownload, .waitingDecrypt:
+            .secondary
         case .completed, .skippedExisting:
             .green
         case .failed:
@@ -304,8 +311,12 @@ enum JobItemStatus: String, Codable {
             "排队中"
         case .resolving:
             "解析中"
+        case .waitingDownload:
+            "等待下载"
         case .downloading:
             "下载中"
+        case .waitingDecrypt:
+            "等待解密"
         case .decrypting:
             "解密中"
         case .remuxing:
@@ -493,6 +504,9 @@ struct JobItem: Codable, Identifiable {
     var statusText: String {
         if status == .failed, let error, !error.isEmpty {
             return error
+        }
+        if status == .waitingDownload || status == .waitingDecrypt {
+            return status.text
         }
         // 后端快照在终态仍保留最后一条阶段消息（如 "ALAC download completed"），
         // 刷新后会把本地化的「已完成」顶掉；status_message 只在活跃阶段展示。

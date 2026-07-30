@@ -17,6 +17,8 @@ struct TaskSpeedPoint: Identifiable, Equatable {
 struct TaskSpeedPresentation: Equatable {
     let downloadBytesPerSecond: Double
     let decryptBytesPerSecond: Double
+    let downloadingItemCount: Int
+    let decryptingItemCount: Int
     let history: [TaskSpeedPoint]
 }
 
@@ -29,12 +31,16 @@ struct TaskSpeedPresentation: Equatable {
 struct TaskSpeedTracker {
     private(set) var downloadBytesPerSecond: Double = 0
     private(set) var decryptBytesPerSecond: Double = 0
+    private(set) var downloadingItemCount = 0
+    private(set) var decryptingItemCount = 0
     private(set) var history: [TaskSpeedPoint] = []
 
     var presentation: TaskSpeedPresentation {
         TaskSpeedPresentation(
             downloadBytesPerSecond: downloadBytesPerSecond,
             decryptBytesPerSecond: decryptBytesPerSecond,
+            downloadingItemCount: downloadingItemCount,
+            decryptingItemCount: decryptingItemCount,
             history: history
         )
     }
@@ -67,14 +73,26 @@ struct TaskSpeedTracker {
     private var decryptSamples: [String: [Sample]] = [:]
     private var downloadSpeeds: [String: Double] = [:]
     private var decryptSpeeds: [String: Double] = [:]
+    private var downloadActivityTimes: [String: Date] = [:]
+    private var decryptActivityTimes: [String: Date] = [:]
+    private var hasObservedExplicitWaitingState = false
     private var nextHistoryID = 0
     private var lastHistoryTime: Date?
 
     mutating func update(with items: [JobItem]) {
+        downloadingItemCount = 0
+        decryptingItemCount = 0
         guard let referenceTime = items.map(\.updatedAt).max() else { return }
+        if items.contains(where: {
+            $0.status == .waitingDownload || $0.status == .waitingDecrypt
+        }) {
+            hasObservedExplicitWaitingState = true
+        }
         let fallbackBitrate = TrackSizeEstimator.representativeBitrate(for: items)
         var downloadingIDs: Set<String> = []
         var decryptingIDs: Set<String> = []
+        var incompleteDownloadIDs: Set<String> = []
+        var incompleteDecryptIDs: Set<String> = []
 
         for item in items {
             guard let totalBytes = TrackSizeEstimator.estimatedBytes(
@@ -87,22 +105,38 @@ struct TaskSpeedTracker {
             switch item.status {
             case .downloading:
                 downloadingIDs.insert(item.id)
-                Self.ingest(
+                let progress = Self.clamped(item.progress.download)
+                if progress < 1 {
+                    incompleteDownloadIDs.insert(item.id)
+                }
+                if Self.ingest(
                     id: item.id,
-                    bytes: Self.clamped(item.progress.download) * totalBytes,
+                    bytes: progress * totalBytes,
                     time: item.updatedAt,
                     samples: &downloadSamples,
                     speeds: &downloadSpeeds
-                )
+                ), progress < 1 {
+                    downloadActivityTimes[item.id] = item.updatedAt
+                } else if progress >= 1 {
+                    downloadActivityTimes[item.id] = nil
+                }
             case .decrypting:
                 decryptingIDs.insert(item.id)
-                Self.ingest(
+                let progress = Self.clamped(item.progress.decrypt)
+                if progress < 1 {
+                    incompleteDecryptIDs.insert(item.id)
+                }
+                if Self.ingest(
                     id: item.id,
-                    bytes: Self.clamped(item.progress.decrypt) * totalBytes,
+                    bytes: progress * totalBytes,
                     time: item.updatedAt,
                     samples: &decryptSamples,
                     speeds: &decryptSpeeds
-                )
+                ), progress < 1 {
+                    decryptActivityTimes[item.id] = item.updatedAt
+                } else if progress >= 1 {
+                    decryptActivityTimes[item.id] = nil
+                }
             default:
                 break
             }
@@ -113,6 +147,12 @@ struct TaskSpeedTracker {
         downloadSpeeds = downloadSpeeds.filter { downloadingIDs.contains($0.key) }
         decryptSamples = decryptSamples.filter { decryptingIDs.contains($0.key) }
         decryptSpeeds = decryptSpeeds.filter { decryptingIDs.contains($0.key) }
+        downloadActivityTimes = downloadActivityTimes.filter {
+            incompleteDownloadIDs.contains($0.key)
+        }
+        decryptActivityTimes = decryptActivityTimes.filter {
+            incompleteDecryptIDs.contains($0.key)
+        }
 
         downloadBytesPerSecond = Self.total(
             of: downloadSpeeds,
@@ -124,17 +164,39 @@ struct TaskSpeedTracker {
             samples: decryptSamples,
             referenceTime: referenceTime
         )
+        if hasObservedExplicitWaitingState {
+            // 新后端只会在拿到相应全局许可后进入 downloading/decrypting；
+            // waiting_* 明确表示排队，所以这里可以直接得到真实占用槽位数。
+            downloadingItemCount = items.count { $0.status == .downloading }
+            decryptingItemCount = items.count { $0.status == .decrypting }
+        } else {
+            // 兼容旧后端：它会在信号量前就把所有曲目标为 downloading。只把最近
+            // 确实发生过阶段进度增长的曲目算作活跃，避免把整张歌单当作并发数。
+            downloadingItemCount = Self.activeCount(
+                activityTimes: downloadActivityTimes,
+                referenceTime: referenceTime
+            )
+            decryptingItemCount = Self.activeCount(
+                activityTimes: decryptActivityTimes,
+                referenceTime: referenceTime
+            )
+        }
         recordHistory(at: referenceTime)
     }
 
     mutating func reset() {
         downloadBytesPerSecond = 0
         decryptBytesPerSecond = 0
+        downloadingItemCount = 0
+        decryptingItemCount = 0
         history.removeAll()
         downloadSamples.removeAll()
         decryptSamples.removeAll()
         downloadSpeeds.removeAll()
         decryptSpeeds.removeAll()
+        downloadActivityTimes.removeAll()
+        decryptActivityTimes.removeAll()
+        hasObservedExplicitWaitingState = false
         nextHistoryID = 0
         lastHistoryTime = nil
     }
@@ -143,27 +205,29 @@ struct TaskSpeedTracker {
         min(max(value, 0), 1)
     }
 
+    @discardableResult
     private static func ingest(
         id: String,
         bytes: Double,
         time: Date,
         samples: inout [String: [Sample]],
         speeds: inout [String: Double]
-    ) {
+    ) -> Bool {
         let current = Sample(bytes: bytes, time: time)
         guard var timeline = samples[id], let previous = timeline.last else {
             samples[id] = [current]
-            return
+            return false
         }
 
         let sincePrevious = time.timeIntervalSince(previous.time)
-        guard sincePrevious >= 0 else { return }
+        guard sincePrevious >= 0 else { return false }
         if bytes < previous.bytes || sincePrevious > Self.staleWindow {
             // 重试会把阶段进度清零；旧速度不能跨重试沿用。
             speeds[id] = nil
             samples[id] = [current]
-            return
+            return false
         }
+        let madeProgress = bytes > previous.bytes
 
         if sincePrevious == 0 {
             timeline[timeline.count - 1] = current
@@ -178,15 +242,16 @@ struct TaskSpeedTracker {
         }
         samples[id] = timeline
 
-        guard let baseline = timeline.first else { return }
+        guard let baseline = timeline.first else { return madeProgress }
         let elapsed = time.timeIntervalSince(baseline.time)
-        guard elapsed >= Self.minimumSampleWindow else { return }
+        guard elapsed >= Self.minimumSampleWindow else { return madeProgress }
         let delta = bytes - baseline.bytes
-        guard delta >= 0 else { return }
+        guard delta >= 0 else { return madeProgress }
         let windowed = delta / elapsed
         speeds[id] = speeds[id].map {
             $0 + Self.smoothing * (windowed - $0)
         } ?? windowed
+        return madeProgress
     }
 
     private static func total(
@@ -200,6 +265,15 @@ struct TaskSpeedTracker {
                 return partial
             }
             return partial + entry.value
+        }
+    }
+
+    private static func activeCount(
+        activityTimes: [String: Date],
+        referenceTime: Date
+    ) -> Int {
+        activityTimes.values.count {
+            referenceTime.timeIntervalSince($0) <= staleWindow
         }
     }
 
@@ -234,15 +308,11 @@ struct TaskSpeedTracker {
 }
 
 enum TransferSpeedFormat {
-    private static let formatter: ByteCountFormatter = {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        formatter.allowsNonnumericFormatting = false
-        return formatter
-    }()
-
     static func string(bytesPerSecond: Double) -> String {
-        let value = formatter.string(fromByteCount: Int64(max(bytesPerSecond, 0)))
-        return "\(value)/s"
+        String(
+            format: "%.1f MB/s",
+            locale: Locale(identifier: "en_US_POSIX"),
+            max(bytesPerSecond, 0) / 1_000_000
+        )
     }
 }
