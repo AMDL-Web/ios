@@ -118,22 +118,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let userInfo = response.notification.request.content.userInfo
         print("[Push] 用户点击通知: \(userInfo)")
 
-        // 专辑下完之后网关会先刷新 Emby、拿到媒体 ID 再发这条推送，所以带链接
-        // 就说明那张专辑此刻在 Emby 里确实点得开，直接过去。
-        //
-        // 拿不到链接的情况都退回应用内详情页，而且这几种情况一点都不罕见：非专辑
-        // 任务、没配 Emby、扫描还没跑到、或者匹配不上。装没装 Emby 也一样 —— open
-        // 的回调告诉我们打不开，再退回来。
-        if let embyURL = Self.embyDeepLink(fromNotificationUserInfo: userInfo) {
-            let opened = await UIApplication.shared.open(embyURL)
-            if opened { return }
-            print("[Push] Emby 打不开（多半是没装），退回应用内详情页")
-        }
-
         guard let jobID = Self.jobID(fromNotificationUserInfo: userInfo) else { return }
-        // 只登记目标，导航由 ContentView 做：这个回调在冷启动时比根视图还早，
-        // 直接推路径没人接得住。
-        PendingDownloadRoute.shared.route(toJob: jobID)
+        // 只登记目标，导航和「拉起 Emby」都由 ContentView 做：这个回调在冷启动时
+        // 比根视图还早，那时本 App 自己都还没 active —— 直接推路径没人接得住，
+        // 直接 UIApplication.open 也会被系统忽略，通知只会把自己打开而已。
+        PendingDownloadRoute.shared.route(
+            toJob: jobID,
+            emby: Self.embyDeepLink(fromNotificationUserInfo: userInfo)
+        )
     }
 
     /// 网关在专辑任务完成时放进 payload 的 `emby_deep_link`
