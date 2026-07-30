@@ -167,6 +167,52 @@ struct amdl_iosTests {
         try assert(abs(detail.progress - (firstItemFraction + 1 + 1) / 3) < 1e-9, "detail progress")
     }
 
+    /// 曲目一多，最后一首的零头在均值里就摊得看不见了：200 首下完 199 首是 0.995，
+    /// 显示成整数正好是 100% —— 而这时最后一首可能一个字节都还没下。只要还有曲目
+    /// 没走完，这个数就得停在 99%。
+    @Test func detailProgressStaysBelowFullUntilEveryTrackIsDone() throws {
+        func detail(completedTracks: Int, lastTrack status: String) throws -> DownloadDetail {
+            let full = #"{"download": 1, "decrypt": 1, "resolved": true, "remuxed": true, "verified": true, "tagged": true, "saved": true}"#
+            let untouched = #"{"download": 0, "decrypt": 0, "resolved": false, "remuxed": false, "verified": false, "tagged": false, "saved": false}"#
+            let stamps = #""created_at": "2026-07-30T00:00:00Z", "updated_at": "2026-07-30T00:00:00Z""#
+
+            let done = (0..<completedTracks).map { index in
+                """
+                {"id": "item_\(index)", "job_id": "big_job", "adam_id": "\(index)", "kind": "song",
+                 "index": \(index + 1), "status": "completed", "progress": \(full), \(stamps)}
+                """
+            }
+            let last = """
+            {"id": "item_last", "job_id": "big_job", "adam_id": "last", "kind": "song",
+             "index": \(completedTracks + 1), "status": "\(status)",
+             "progress": \(status == "completed" ? full : untouched), \(stamps)}
+            """
+            let allDone = status == "completed"
+            let json = """
+            {
+              "job": {
+                "id": "big_job", "input": "https://music.apple.com/cn/album/1", "type": "album",
+                "force": false, "status": "\(allDone ? "completed" : "running")",
+                "total_items": \(completedTracks + 1),
+                "done_items": \(allDone ? completedTracks + 1 : completedTracks), "failed_items": 0,
+                \(stamps)
+              },
+              "items": [\((done + [last]).joined(separator: ","))]
+            }
+            """.data(using: .utf8)!
+            return try DownloadsAPI.decodeDownloadDetail(from: json)
+        }
+
+        // 199/200 还没动最后一首：原始均值 0.995，四舍五入就是 100%。
+        let almost = try detail(completedTracks: 199, lastTrack: "queued")
+        try assert(almost.progress > 0.9, "199/200 is still nearly done")
+        try assert(almost.progress <= 0.99, "199/200 must not round up to 100%")
+
+        // 最后一首也走完了才允许报满。
+        let finished = try detail(completedTracks: 199, lastTrack: "completed")
+        try assert(finished.progress == 1, "every track done reads as 100%")
+    }
+
     @Test func trackDurationSummaryFormatsAdaptiveUnits() throws {
         // 无时长（旧后端或未解析）不产生底注片段。
         try assert(TrackDurationSummary.totalDurationText(totalMilliseconds: 0) == nil, "zero → nil")

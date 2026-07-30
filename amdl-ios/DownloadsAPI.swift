@@ -609,7 +609,13 @@ struct DownloadDetail: Codable {
     var progress: Double {
         guard !items.isEmpty else { return job.progress }
         let total = items.reduce(0) { $0 + $1.clampedProgress }
-        return total / Double(items.count)
+        let average = total / Double(items.count)
+        // 还有曲目没走完就绝不报到 100%。曲目一多，最后那一首的零头在均值里就摊得
+        // 看不见了：200 首下完 199 首是 0.995，四舍五入到整数正好是 100% —— 而这
+        // 时最后一首可能才刚开始。封顶封在**数值**上而不是各个显示点上，是因为
+        // 详情页的百分比、分段条的半透明段、灵动岛和锁屏读的都是这一个数。
+        guard items.contains(where: { $0.status.isActive }) else { return average }
+        return min(average, 0.99)
     }
 
     /// 合并刷新快照时保留已解析出的稳定展示信息。下载状态、进度、错误和 hook
