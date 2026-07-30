@@ -1,0 +1,12 @@
+// Portal host, injected at compile time. Committed and intentionally empty:
+// a base configuration reference must resolve in a fresh clone or xcodebuild
+// fails outright with "Unable to open base configuration reference file" —
+// it is an error, not a warning, which is how CI stayed red.
+//
+// Your own host goes in Portal.local.xcconfig (gitignored, optional include
+// below). CI passes AMDL_PORTAL_HOST on the xcodebuild command line instead.
+// Empty is a supported state: BackendEndpoint returns "" and the app asks the
+// user for an address.
+AMDL_PORTAL_HOST =
+
+#include? "Portal.local.xcconfig"
