@@ -75,6 +75,53 @@ struct amdl_iosTests {
         try assert(small.imageCacheKey != large.imageCacheKey, "template image cache should retain size")
     }
 
+    /// 概览和详情各存各的尺寸，所以谁先拿到图，另一边都得能先借来顶上。
+    ///
+    /// 借的方向以前只有一个：详情借概览。分享拓展和完成通知走 `amdl://download/<id>`
+    /// 深链直接进详情页，概览列表压根没出现过，那张 256 从来没人取过 —— 退回列表
+    /// 时没得借，就得从占位图重新等一次。
+    @Test @MainActor func artworkFallsBackBetweenOverviewAndHeroSizes() throws {
+        let job = try DownloadsAPI.decodeDownloadDetail(from: """
+        {
+          "job": {
+            "id": "job_art", "input": "https://music.apple.com/cn/album/example/1", "type": "album",
+            "force": false, "status": "running", "total_items": 1, "done_items": 0, "failed_items": 0,
+            "artwork_url": "https://is1-ssl.mzstatic.com/image/thumb/x/{w}x{h}bb.jpg",
+            "created_at": "2026-07-30T00:00:00Z", "updated_at": "2026-07-30T00:00:00Z"
+          },
+          "items": []
+        }
+        """.data(using: .utf8)!).job
+
+        let overview = JobArtworkLoader.overviewPixelSize
+        let hero = JobArtworkLoader.heroPixelSize
+        try assert(hero != overview, "hero and overview must be different sizes for this to matter")
+
+        let overviewKey = JobArtworkLoader.cacheKey(for: job, pixelSize: overview)
+        let heroKey = JobArtworkLoader.cacheKey(for: job, pixelSize: hero)
+        try assert(overviewKey != heroKey, "each size caches separately")
+
+        // 详情 → 概览：这一条以前是 nil，正是深链进来后退回列表要等图的原因。
+        try assert(
+            JobArtworkLoader.fallbackCacheKey(for: job, pixelSize: overview) == heroKey,
+            "overview borrows the hero image"
+        )
+        // 概览 → 详情：原有方向，不能改坏。
+        try assert(
+            JobArtworkLoader.fallbackCacheKey(for: job, pixelSize: hero) == overviewKey,
+            "hero borrows the overview image"
+        )
+
+        // 私人歌单两档尺寸共用一个 key，没有另一份可借，不能自己借自己。
+        let privateJob = privatePlaylistJob(
+            artworkURL: "https://example-bucket.s3.amazonaws.com/cover.jpg?X-Amz-Expires=86400"
+        )
+        try assert(
+            JobArtworkLoader.fallbackCacheKey(for: privateJob, pixelSize: overview) == nil,
+            "a shared cache key has nothing to borrow"
+        )
+    }
+
     @Test func downloadDetailDecodesJobItems() throws {
         let json = """
         {
