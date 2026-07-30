@@ -1111,9 +1111,23 @@ struct PortalAuthTests {
         let base = BackendEndpoint.baseURLString
         let gateway = BackendEndpoint.apnsURLString(from: base)
 
+        // Holds whatever the host is, including empty: the point of this test is
+        // that there is one setting, not what it contains.
         #expect(DownloadsAPI.baseURLString == base)
         #expect(LiveActivityGatewayAPI.baseURLString == gateway)
-        #expect(gateway.hasSuffix("/apns"))
+
+        // The `/apns` derivation is checked against an explicit host rather than
+        // the ambient one. AMDL_PORTAL_HOST is injected at compile time and is
+        // empty in a fresh clone and on CI, and a test that silently asserts a
+        // property of the build configuration is worse than no test — that is
+        // exactly how these two started failing only on CI.
+        let derived = BackendEndpoint.apnsURLString(from: "https://amdl.example.com")
+        #expect(derived == "https://amdl.example.com/apns")
+        #expect(derived.hasSuffix("/apns"))
+        #expect(BackendEndpoint.apnsURLString(from: "https://amdl.example.com/apns") == derived)
+        #expect(BackendEndpoint.apnsURLString(from: "") == "")
+
+        guard !gateway.isEmpty else { return }
         #expect(LiveActivityGatewayAPI.makeURL(path: "/v1/devices/abc/push-token")?.absoluteString
             == gateway + "/v1/devices/abc/push-token")
         #expect(LiveActivityGatewayAPI.makeURL(path: "/health")?.absoluteString
@@ -1191,15 +1205,21 @@ struct PortalAuthTests {
     /// 断言恰好成立。那正是这次要消掉的分叉，所以断言改成钉住策略本身：**只信任
     /// 配置里的那一个 host，且必须精确匹配**。
     @Test func bearerGoesOnlyToThePortalHost() throws {
-        let host = try #require(URLComponents(string: DownloadsAPI.baseURLString)?.host)
+        // These hold with no host configured at all, which is the state of a
+        // fresh clone and of CI: AMDL_PORTAL_HOST is injected at compile time.
+        #expect(!AppleAuthCredentialStore.isGatewayHost("is5-ssl.mzstatic.com"))
+        #expect(!AppleAuthCredentialStore.isGatewayHost(nil))
+        #expect(!AppleAuthCredentialStore.isGatewayHost(""))
+
+        // The rest describes a configured build. Returning early rather than
+        // asserting against an empty host keeps the test honest about what it
+        // can see, instead of failing only on CI for the wrong reason.
+        guard let host = URLComponents(string: DownloadsAPI.baseURLString)?.host else { return }
         #expect(AppleAuthCredentialStore.isGatewayHost(host))
         #expect(AppleAuthCredentialStore.isGatewayHost(host.uppercased()))
         // 网关走同一个 host，所以派生出来的地址不会引入第二个受信任域名。
         #expect(URLComponents(string: LiveActivityGatewayAPI.baseURLString)?.host == host)
-        #expect(!AppleAuthCredentialStore.isGatewayHost("is5-ssl.mzstatic.com"))
         #expect(!AppleAuthCredentialStore.isGatewayHost("\(host).evil.example"))
-        #expect(!AppleAuthCredentialStore.isGatewayHost(nil))
-        #expect(!AppleAuthCredentialStore.isGatewayHost(""))
     }
 
     /// 两种错误体形状、同一张码表（DESIGN.md §6.3）。
