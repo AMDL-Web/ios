@@ -104,6 +104,31 @@ struct DownloadDetailSummaryView: View {
         job.status == .completed ? 1 : progress
     }
 
+    /// 实心段：已经彻底结束的曲目占比。只整格跳，所以永远落在刻度上。
+    ///
+    /// 用 `done + failed` 而不是只用 `done`：失败的那首不会再有进展了，把它留在
+    /// 实心段外面，条会停在那里再也走不到头，看着像卡住。
+    private var segmentedDone: Double {
+        // 一首歌没什么好分段的，整根条就是它自己的进度，和以前逐像素一致。
+        guard job.totalItems > 1 else { return barProgress }
+        guard job.status != .completed else { return 1 }
+        return min(1, Double(job.doneItems + job.failedItems) / Double(job.totalItems))
+    }
+
+    /// 半透明段：详情页那个百分比本身。旁边的大数字就是这一段的尖端。
+    ///
+    /// 取 max 是因为失败的曲目在均值里只按它死掉时的零头计，均值可能反而落在
+    /// 实心段后面 —— 那种时候不画这一段，而不是画一段倒退的。
+    private var segmentedLive: Double {
+        guard job.totalItems > 1 else { return 0 }
+        return max(segmentedDone, barProgress)
+    }
+
+    /// 刻度格数。曲目多到刻度糊成一片就不画了，24 是 Web 端量出来的同一个上限。
+    private var segmentedTicks: Int {
+        (2...24).contains(job.totalItems) ? job.totalItems : 0
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             JobArtworkView(job: job, pixelSize: JobArtworkLoader.heroPixelSize)
@@ -149,9 +174,12 @@ struct DownloadDetailSummaryView: View {
             }
 
             VStack(spacing: 6) {
-                ThinProgressBar(
-                    progress: barProgress,
+                SegmentedProgressBar(
+                    done: segmentedDone,
+                    live: segmentedLive,
+                    ticks: segmentedTicks,
                     tint: progressBarTint,
+                    tickColor: palette?.background ?? Color(.systemBackground),
                     height: 5
                 )
 
