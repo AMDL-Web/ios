@@ -77,11 +77,6 @@ jobs:
           # PR 合并触发时检出合并进 main 的那个提交;手动触发时用所选 ref。
           ref: ${{ github.event.pull_request.merge_commit_sha || github.ref }}
 
-      - name: Create portal build configuration
-        # 工程把本机配置指向 gitignored 的 Portal.xcconfig。全新 runner 上必须
-        # 先创建这个文件;归档时再由命令行里的 AMDL_PORTAL_HOST secret 覆盖空值。
-        run: cp Config/Portal.xcconfig.example Config/Portal.xcconfig
-
       - name: Resolve version and build number
         id: version
         env:
