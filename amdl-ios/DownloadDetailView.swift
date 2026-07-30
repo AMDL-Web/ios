@@ -34,9 +34,8 @@ struct DownloadDetailView: View {
     @State private var lastEventID: Int64 = 0
     @State private var presentedQualityDetails: AudioQualityPresentation.Details?
     @State private var isShowingInfo = false
+    @State private var isShowingRealtimeSpeed = false
     @State private var speedTracker = TaskSpeedTracker()
-    @AppStorage("downloadDetail.showsRealtimeSpeed")
-    private var showsRealtimeSpeed = false
     private var job: Job? {
         detail?.job ?? initialJob
     }
@@ -51,10 +50,6 @@ struct DownloadDetailView: View {
 
     private var hooks: [HookState] {
         detail?.hooks ?? []
-    }
-
-    private var speedPresentation: TaskSpeedPresentation? {
-        showsRealtimeSpeed ? speedTracker.presentation : nil
     }
 
     private var appleMusicURL: URL? {
@@ -93,31 +88,37 @@ struct DownloadDetailView: View {
         return !job.status.isActive && !hooks.contains { $0.isActive }
     }
 
+    /// 后端解析 input 之前，任务上只有一条链接：没有标题、没有曲目数、没有封面
+    /// 配色，也没有逐曲清单。解析前后**是两份内容**，不是同一份内容长高了。
+    ///
+    /// 进了终态就不再算「等解析」：解析失败的任务永远等不到标题，它得照常显示自己
+    /// 的错误，而不是停在另一份内容上。
+    private var isAwaitingMetadata: Bool {
+        guard let job else { return true }
+        guard job.status.isActive else { return false }
+        let hasTitle = !(job.title ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty
+        return !hasTitle && job.totalItems == 0
+    }
+
     var body: some View {
         ZStack {
-            if job?.type == .song {
-                DownloadSongDetailContent(
-                    job: job,
-                    items: items,
-                    progress: progress,
-                    speed: speedPresentation,
-                    errorMessage: errorMessage,
-                    palette: palette,
-                    presentedQualityDetails: $presentedQualityDetails
-                )
-            } else {
-                DownloadTrackListView(
-                    job: job,
-                    items: items,
-                    progress: progress,
-                    speed: speedPresentation,
-                    isLoading: isLoading,
-                    hasLoadedDetail: detail != nil,
-                    errorMessage: errorMessage,
-                    palette: palette,
-                    presentedQualityDetails: $presentedQualityDetails
-                )
-            }
+            detailContent
+                // 元数据到达那一刻，标题从链接换成真标题（一行变两行）、`0/0` 变成
+                // `0/48`、「暂无轨道明细」变成整张曲目表 —— 而封面配色也正好在同一次
+                // 更新里从无到有。于是下面那条 `.animation(value: palette)` 把这次
+                // 内容替换一并接管了：SwiftUI 找不到「两份内容」，只看见同一个视图的
+                // 高度从 A 变成 B，就去补间这个差值。封面以下的一切在那半秒里连续
+                // 滑动，两套版式还同时挂在屏幕上（`已完成 0/0` 和 `已完成 0/48` 相隔
+                // 一行地一起显影）。
+                //
+                // 给两种状态各自的身份 + 纯不透明度过渡之后，就没有任何几何量可补间
+                // 了：旧的那份在原地淡出，新的那份从第一帧起就待在自己的最终位置上
+                // 淡入。ZStack 让两份重叠共存、谁都不参与对方的布局，所以淡入淡出还
+                // 在，版式本身一个数都没动。
+                .id(isAwaitingMetadata)
+                .transition(.opacity)
         }
         .background {
             if let palette {
@@ -140,7 +141,9 @@ struct DownloadDetailView: View {
                             job: job,
                             taskURL: appleMusicURL,
                             runner: actionRunner,
-                            showsRealtimeSpeed: $showsRealtimeSpeed,
+                            showRealtimeSpeed: {
+                                isShowingRealtimeSpeed = true
+                            },
                             showInfo: { isShowingInfo = true },
                             onOutcome: handle(outcome:)
                         )
@@ -164,6 +167,14 @@ struct DownloadDetailView: View {
                 DownloadDetailInfoView(job: job, items: items, hooks: hooks)
             }
         }
+        .sheet(isPresented: $isShowingRealtimeSpeed) {
+            DownloadTaskSpeedView(speed: speedTracker.presentation)
+        }
+        .onChange(of: job?.status.isActive) { _, isActive in
+            guard isActive != true else { return }
+            isShowingRealtimeSpeed = false
+            speedTracker.reset()
+        }
         .alert(item: $presentedQualityDetails) { details in
             Alert(
                 title: Text(details.title),
@@ -173,6 +184,33 @@ struct DownloadDetailView: View {
         }
         .jobActionFailureAlert(runner: actionRunner)
         .swAlert()
+    }
+
+    /// 页面主体。原样从 `body` 里搬出来，只为让 `.id` / `.transition` 有个落点；
+    /// 视图本身和它们收到的参数一个字都没改。
+    @ViewBuilder
+    private var detailContent: some View {
+        if job?.type == .song {
+            DownloadSongDetailContent(
+                job: job,
+                items: items,
+                progress: progress,
+                errorMessage: errorMessage,
+                palette: palette,
+                presentedQualityDetails: $presentedQualityDetails
+            )
+        } else {
+            DownloadTrackListView(
+                job: job,
+                items: items,
+                progress: progress,
+                isLoading: isLoading,
+                hasLoadedDetail: detail != nil,
+                errorMessage: errorMessage,
+                palette: palette,
+                presentedQualityDetails: $presentedQualityDetails
+            )
+        }
     }
 
     /// 动作成功之后详情页要做的事。
@@ -229,7 +267,7 @@ struct DownloadDetailView: View {
                 cached.job.preservePresentationMetadata(from: initialJob)
             }
             detail = cached
-            speedTracker.update(with: cached.items)
+            updateSpeedTracker(with: cached.items)
             lastEventID = max(lastEventID, cached.lastEventID ?? 0)
         }
         let hasCache = detail != nil
@@ -268,7 +306,7 @@ struct DownloadDetailView: View {
                         lastEventID = event.id
                         guard detail?.apply(event) == true else { continue }
                         if let detail {
-                            speedTracker.update(with: detail.items)
+                            updateSpeedTracker(with: detail.items)
                         }
 
                         if event.requiresDetailSnapshotRefresh {
@@ -321,7 +359,7 @@ struct DownloadDetailView: View {
                     snapshot.job.preservePresentationMetadata(from: initialJob)
                 }
                 detail = snapshot
-                speedTracker.update(with: snapshot.items)
+                updateSpeedTracker(with: snapshot.items)
                 await DownloadLiveActivityManager.shared.refreshFromDetail(snapshot)
                 guard !Task.isCancelled else { return }
                 lastEventID = max(lastEventID, snapshotEventID)
@@ -348,13 +386,19 @@ struct DownloadDetailView: View {
             }
         }
     }
+
+    /// 只在当前详情页生命周期内保留一小段趋势。关闭弹窗后继续更新这份临时内存，
+    /// 再次打开可以直接续上；不会写入 UserDefaults、数据库或磁盘。
+    private func updateSpeedTracker(with items: [JobItem]) {
+        speedTracker.update(with: items)
+    }
 }
 
 private struct DownloadDetailLinkActions: View {
     let job: Job
     let taskURL: URL?
     let runner: JobActionRunner
-    @Binding var showsRealtimeSpeed: Bool
+    let showRealtimeSpeed: () -> Void
     let showInfo: () -> Void
     let onOutcome: (JobActionOutcome) -> Void
 
@@ -382,8 +426,10 @@ private struct DownloadDetailLinkActions: View {
                     Label("详细信息", systemImage: "info.circle")
                 }
 
-                Toggle(isOn: $showsRealtimeSpeed) {
-                    Label("实时速度显示", systemImage: "chart.xyaxis.line")
+                if job.status.isActive {
+                    Button(action: showRealtimeSpeed) {
+                        Label("实时速度显示", systemImage: "chart.xyaxis.line")
+                    }
                 }
 
                 // 可用动作跟着 job.status 走，而 job 是详情页那份被事件流实时更新的
