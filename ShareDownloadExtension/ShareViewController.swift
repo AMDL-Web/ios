@@ -57,13 +57,13 @@ final class ShareViewController: UIViewController {
         iconView.tintColor = .systemBlue
         iconView.contentMode = .center
 
-        statusLabel.text = "正在创建下载任务"
+        statusLabel.text = "正在识别"
         statusLabel.font = .preferredFont(forTextStyle: .title3)
         statusLabel.adjustsFontForContentSizeCategory = true
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 2
 
-        messageLabel.text = "正在读取分享的链接"
+        messageLabel.text = "识别成功后会自动入队"
         messageLabel.font = .preferredFont(forTextStyle: .subheadline)
         messageLabel.adjustsFontForContentSizeCategory = true
         messageLabel.textColor = .secondaryLabel
@@ -180,7 +180,6 @@ final class ShareViewController: UIViewController {
         do {
             let url = try await extractSharedURL()
             try Task.checkCancellation()
-            messageLabel.text = url.absoluteString
 
             // 主 App 每次提交都现取一次 media user token；扩展问不到 MusicKit，
             // 读的是主 App 抄进钥匙串的那份副本。见 `MediaUserTokenStore`。
@@ -224,7 +223,7 @@ final class ShareViewController: UIViewController {
     private func showCreatedState(missingArtworkToken: Bool) {
         iconView.image = UIImage(systemName: "checkmark.circle.fill")
         iconView.tintColor = .systemGreen
-        statusLabel.text = "任务已创建"
+        statusLabel.text = "已确认入队"
         statusLabel.textColor = .label
         // 私人歌单没有令牌照样能下完，只是封面取不到。这不值得拦下提交，但也不该
         // 一声不吭——「封面不对」正是这次报告里的另一半。
