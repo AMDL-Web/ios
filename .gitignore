@@ -24,5 +24,7 @@ build/
 .agents/
 skills-lock.json
 
-# Local portal host — see Config/Portal.xcconfig.example
-Config/Portal.xcconfig
+# Local portal host. Config/Portal.xcconfig IS committed (empty) so the
+# project's base configuration reference resolves in a fresh clone; it
+# optionally includes this file, which holds your real host.
+Config/Portal.local.xcconfig

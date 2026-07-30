@@ -78,23 +78,35 @@ struct JobArtworkView: View {
     }
 
     var body: some View {
-        ZStack {
-            // 占位一直垫在最底下，`CachedAsyncImage` 在真正解出 UIImage 之前画的是
-            // Color.clear —— 这样封面槽位从头到尾都有东西，不会先闪一下白底。
-            JobArtworkPlaceholder(job: job)
-
-            // 即便 fallbackURL 还没解析出来，只要本地缓存里有这个 key 的图，
-            // CachedAsyncImage 就会优先加载缓存，不会用过期 URL 覆盖当前画面。
-            CachedAsyncImage(
-                url: privateRequest == nil ? primaryURL : fallbackURL,
-                cacheKey: cacheKey,
-                fallbackCacheKey: fallbackCacheKey
-            )
-            .id("\(cacheKey)|\(artworkRevision)")
-        }
-        .task(id: "\(job.id)|\(job.artworkURL ?? "")|\(pixelSize)") {
-            await loadPrivatePlaylistArtwork()
-        }
+        // 槽位大小只跟父视图给的建议有关，跟里面装的是什么无关。
+        //
+        // 以前这里是 ZStack 直接摞占位图和 `CachedAsyncImage`，两层谁都不声明尺寸：
+        // 图解出来之前画的是 Color.clear，解出来之后理想尺寸又变成封面的原始像素，
+        // 于是槽位多大是跟内容协商出来的。列表行只是碰巧写死了 56×56 才一直稳，
+        // 详情页 Hero 只约束了比例不约束大小，换图、`.id` 重建、压根没有封面，都可能
+        // 让它跟着动一下。现在由占位图（一个 Shape，尺寸只认建议）撑出正方形槽位，
+        // 封面放进 overlay —— overlay 不参与布局，谁都顶不动它。
+        //
+        // 顺带保住原来的层次：占位一直垫在最底下，`CachedAsyncImage` 在真正解出
+        // UIImage 之前画的是 Color.clear，封面槽位从头到尾都有东西，不会闪白底。
+        JobArtworkPlaceholder(job: job)
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                // 即便 fallbackURL 还没解析出来，只要本地缓存里有这个 key 的图，
+                // CachedAsyncImage 就会优先加载缓存，不会用过期 URL 覆盖当前画面。
+                CachedAsyncImage(
+                    url: privateRequest == nil ? primaryURL : fallbackURL,
+                    cacheKey: cacheKey,
+                    fallbackCacheKey: fallbackCacheKey
+                )
+                .id("\(cacheKey)|\(artworkRevision)")
+            }
+            // scaledToFill 出来的图可能比槽位大一圈，就地裁掉溢出的部分；圆角仍然
+            // 由调用方给（列表 12pt、详情页 10pt），这里只负责不画到槽位外面去。
+            .clipped()
+            .task(id: "\(job.id)|\(job.artworkURL ?? "")|\(pixelSize)") {
+                await loadPrivatePlaylistArtwork()
+            }
     }
 
     private func loadPrivatePlaylistArtwork() async {

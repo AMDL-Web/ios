@@ -1,3 +1,0 @@
-// Your portal host, e.g. amdl.example.com — scheme is added in code.
-// Copy to Portal.xcconfig (gitignored) and fill in.
-AMDL_PORTAL_HOST =
