@@ -72,6 +72,28 @@ struct RuntimeConfig: Codable, Sendable {
     var download: DownloadConfig?
     var logging: LoggingConfig?
     var simulate: SimulateConfig?
+    var librarySync: LibrarySyncConfig?
+
+    enum CodingKeys: String, CodingKey {
+        case catalog, download, logging, simulate
+        case librarySync = "library_sync"
+    }
+}
+
+/// 资料库监视器：后端轮询已登录 Apple Music 资料库，把新加入曲目所属的**专辑**
+/// 当作普通下载任务提交。手机上收藏一首歌，NAS 那边就自动下整张专辑。
+///
+/// 依赖 `catalog.media_user_token` —— 个人资料库只有订阅令牌读得到。该字段为空时
+/// 监视器空转，原因见 `GET /api/v1/library-sync` 的 `last_error`。
+struct LibrarySyncConfig: Codable, Sendable {
+    var enabled: Bool?
+    /// 轮询间隔（分钟），后端限定 1...1440。
+    var intervalMinutes: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case intervalMinutes = "interval_minutes"
+    }
 }
 
 struct CatalogConfig: Codable, Sendable {

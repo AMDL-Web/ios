@@ -145,6 +145,14 @@ struct RadioView: View {
                     LogStreamView(configStore: store)
                 }
                 SettingsRow(
+                    title: "资料库同步",
+                    systemImage: "music.note.house.fill",
+                    tint: .pink,
+                    value: store.form.librarySyncSummary
+                ) {
+                    LibrarySyncPage(store: store)
+                }
+                SettingsRow(
                     title: "模拟模式",
                     systemImage: "testtube.2",
                     tint: .green,
@@ -478,6 +486,17 @@ private struct SimulatePage: View {
     }
 }
 
+private struct LibrarySyncPage: View {
+    @Bindable var store: ConfigStore
+    var body: some View {
+        Form { LibrarySyncSection(form: $store.form) }
+            .navigationTitle("资料库同步")
+            .navigationBarTitleDisplayMode(.inline)
+            .configSaveStatusToolbar(store)
+            .animation(.snappy, value: store.form.librarySyncEnabled)
+    }
+}
+
 // MARK: - 表单模型
 
 /// 配置页的可编辑视图模型。字段均为非可选，缺省值取后端 Default()；
@@ -530,6 +549,14 @@ struct ConfigForm: Equatable {
     var simulateEnabled = false
     var simulateMinKbps = 512
     var simulateMaxKbps = 4096
+    var librarySyncEnabled = false
+    var librarySyncIntervalMinutes = 15
+    /// 后端这次 GET 是否返回了 `library_sync` 段。
+    ///
+    /// 保存时据此决定要不要带上该段：后端的 PUT 会**拒绝未知字段并返回 400**，
+    /// 所以对着还没有这个功能的旧后端无条件发送，会让每一次保存设置都失败——
+    /// 而且失败的是用户当时真正想改的那项。
+    private(set) var librarySyncSupported = false
 
     init() {}
 
@@ -575,6 +602,11 @@ struct ConfigForm: Equatable {
             simulateMinKbps = s.minSpeedKbps ?? simulateMinKbps
             simulateMaxKbps = s.maxSpeedKbps ?? simulateMaxKbps
         }
+        if let ls = config.librarySync {
+            librarySyncSupported = true
+            librarySyncEnabled = ls.enabled ?? librarySyncEnabled
+            librarySyncIntervalMinutes = ls.intervalMinutes ?? librarySyncIntervalMinutes
+        }
     }
 
     var usesALAC: Bool { qualityPriority.contains(.alac) }
@@ -593,6 +625,11 @@ struct ConfigForm: Equatable {
             if simulateMaxKbps < simulateMinKbps {
                 return "模拟最大速度需 ≥ 最小速度。"
             }
+        }
+        // 与后端 config.Validate 的区间一致，先在本地拦下，免得白跑一次 422。
+        // 只在这一段会被发出去时才校验——不支持时它根本不进请求体。
+        if librarySyncSupported && (librarySyncIntervalMinutes < 1 || librarySyncIntervalMinutes > 1440) {
+            return "资料库同步间隔需在 1–1440 分钟之间。"
         }
         return nil
     }
@@ -639,7 +676,14 @@ struct ConfigForm: Equatable {
                 enabled: simulateEnabled,
                 minSpeedKbps: simulateMinKbps,
                 maxSpeedKbps: simulateMaxKbps
-            )
+            ),
+            // 见 librarySyncSupported：旧后端会把整个请求以 400 拒掉。
+            librarySync: librarySyncSupported
+                ? LibrarySyncConfig(
+                    enabled: librarySyncEnabled,
+                    intervalMinutes: librarySyncIntervalMinutes
+                )
+                : nil
         )
     }
 }
@@ -695,6 +739,17 @@ private extension ConfigForm {
 
     var simulateSummary: String {
         simulateEnabled ? "已开启 · \(simulateMinKbps)–\(simulateMaxKbps) KB/s" : "已关闭"
+    }
+
+    var librarySyncSummary: String {
+        // 不支持时必须说出来：否则「已关闭」看起来像一个可以打开的开关，
+        // 而实际上改了也不会被保存。
+        guard librarySyncSupported else { return "后端不支持" }
+        guard librarySyncEnabled else { return "已关闭" }
+        if librarySyncIntervalMinutes % 60 == 0 {
+            return "每 \(librarySyncIntervalMinutes / 60) 小时"
+        }
+        return "每 \(librarySyncIntervalMinutes) 分钟"
     }
 }
 
@@ -1032,6 +1087,43 @@ private struct PathsSection: View {
                 .font(.footnote.monospaced())
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct LibrarySyncSection: View {
+    @Binding var form: ConfigForm
+
+    var body: some View {
+        Section {
+            Toggle("资料库同步", isOn: $form.librarySyncEnabled)
+                .disabled(!form.librarySyncSupported)
+        } footer: {
+            if form.librarySyncSupported {
+                Text("后端定期检查 Apple Music 资料库，把新加入曲目所属的整张专辑加入下载队列。开启前需要先在「媒体用户令牌」里填好订阅令牌，否则读不到个人资料库。")
+            } else {
+                Text("当前后端没有这个功能，升级后端后可用。")
+            }
+        }
+
+        if form.librarySyncSupported && form.librarySyncEnabled {
+            Section {
+                LabeledContent("检查间隔") {
+                    HStack(spacing: 4) {
+                        TextField("15", value: $form.librarySyncIntervalMinutes, format: .number)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .monospacedDigit()
+                            .frame(maxWidth: 96)
+                        Text("分钟")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("轮询")
+            } footer: {
+                Text("取值 1–1440 分钟。一次检查通常只有一个网络请求，间隔短不会明显增加开销。首次开启只记录当前资料库状态，不会补下已有内容。")
+            }
+        }
     }
 }
 
