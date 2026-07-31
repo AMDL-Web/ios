@@ -15,6 +15,15 @@ import AppIntents
 /// 令牌进入 App 的唯一那道门。
 @MainActor
 enum AppleMusicTokenService {
+    /// 主 App 的本地偏好：是否在每次进入前台时把最新 media user token 写进后端。
+    /// 开关不含敏感值，放 UserDefaults；令牌本身仍只进钥匙串和一次 HTTPS 请求。
+    nonisolated static let syncToBackendOnActivationKey =
+        "syncMediaUserTokenToBackendOnActivation"
+
+    static var syncToBackendOnActivation: Bool {
+        UserDefaults.standard.bool(forKey: syncToBackendOnActivationKey)
+    }
+
     static func currentUserToken() async throws -> String? {
         guard MusicAuthorization.currentStatus == .authorized else {
             // 授权被撤销之后还留着旧副本，只会让分享扩展拿着一个必定被 Apple 拒掉
@@ -44,6 +53,57 @@ enum AppleMusicTokenService {
     /// 那条路径下钥匙串里永远不会有令牌。
     static func refreshSharedToken() async {
         _ = try? await currentUserToken()
+    }
+
+    /// 忽略 MusicKit 缓存取得最新用户令牌，并用最小配置 patch 写入后端。
+    ///
+    /// `ConfigAPI` 的成功响应若明确说 `persisted == false`，令牌只进了后端内存，
+    /// 不满足“同步到配置文件”，因此这里仍然报失败。旧后端不返回该字段时保持兼容。
+    static func syncFreshUserTokenToBackend() async throws {
+        guard MusicAuthorization.currentStatus == .authorized else {
+            MediaUserTokenStore.clear()
+            throw MediaUserTokenBackendSyncError.notAuthorized
+        }
+        let tokens = try await freshTokens()
+        try Task.checkCancellation()
+        let response = try await ConfigAPI.updateMediaUserToken(tokens.user)
+        if response.persisted == false {
+            throw MediaUserTokenBackendSyncError.notPersisted(response.reloadError)
+        }
+    }
+
+    /// App 进入前台的统一入口。开关关闭时保持原来的“只刷新分享扩展副本”行为；
+    /// 开启时 freshTokens() 同时刷新副本，所以不会向 MusicKit 重复取两次。
+    static func refreshForAppActivation() async {
+        guard syncToBackendOnActivation else {
+            await refreshSharedToken()
+            return
+        }
+        do {
+            try await syncFreshUserTokenToBackend()
+            print("[Apple Music] 已把最新 media user token 同步到后端配置")
+        } catch {
+            // 不打印 token；启动同步失败不能阻塞 App 的其他前台恢复工作。
+            print("[Apple Music] 自动同步 media user token 失败：\(error.localizedDescription)")
+        }
+    }
+}
+
+private enum MediaUserTokenBackendSyncError: LocalizedError {
+    case notAuthorized
+    case notPersisted(String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .notAuthorized:
+            "Apple Music 未授权，无法获取 Music-User-Token。"
+        case let .notPersisted(reloadError):
+            if let reloadError, !reloadError.isEmpty {
+                "后端只更新了内存，未写入配置文件：\(reloadError)"
+            } else {
+                "后端只更新了内存，未写入配置文件。"
+            }
+        }
     }
 }
 

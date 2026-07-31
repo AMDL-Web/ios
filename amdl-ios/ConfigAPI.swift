@@ -72,6 +72,28 @@ struct RuntimeConfig: Codable, Sendable {
     var download: DownloadConfig?
     var logging: LoggingConfig?
     var simulate: SimulateConfig?
+    var librarySync: LibrarySyncConfig?
+
+    enum CodingKeys: String, CodingKey {
+        case catalog, download, logging, simulate
+        case librarySync = "library_sync"
+    }
+}
+
+/// 资料库监视器：后端轮询已登录 Apple Music 资料库，把新加入曲目所属的**专辑**
+/// 当作普通下载任务提交。手机上收藏一首歌，NAS 那边就自动下整张专辑。
+///
+/// 依赖 `catalog.media_user_token` —— 个人资料库只有订阅令牌读得到。该字段为空时
+/// 监视器空转，原因见 `GET /api/v1/library-sync` 的 `last_error`。
+struct LibrarySyncConfig: Codable, Sendable {
+    var enabled: Bool?
+    /// 轮询间隔（分钟），后端限定 1...1440。
+    var intervalMinutes: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case intervalMinutes = "interval_minutes"
+    }
 }
 
 struct CatalogConfig: Codable, Sendable {
@@ -188,6 +210,32 @@ enum ConfigAPI {
         return try await send(request)
     }
 
+    /// 只更新后端的全局 media-user-token fallback。
+    ///
+    /// 这是自动同步路径使用的最小 patch；其余 catalog 键和整个 download/logging/
+    /// simulate 段都必须省略，不能拿配置页可能已经过时的整份表单覆盖后端。
+    static func updateMediaUserToken(_ token: String) async throws -> ConfigResponse {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw MediaUserTokenConfigError.emptyToken
+        }
+        return try await updateConfig(mediaUserTokenPatch(trimmed))
+    }
+
+    /// 纯函数，既固定部分更新的 JSON 形状，也让测试不需要真的访问后端。
+    static func mediaUserTokenPatch(_ token: String) -> RuntimeConfig {
+        RuntimeConfig(
+            catalog: CatalogConfig(
+                albumTrackURLMode: nil,
+                mediaUserToken: token,
+                signedModeHLSSource: nil
+            ),
+            download: nil,
+            logging: nil,
+            simulate: nil
+        )
+    }
+
     /// 探测后端是否处于「本地签名开发者 token」模式。
     ///
     /// 后端没有直接暴露这个状态：catalog.apple_music_private_key_path / key_id /
@@ -199,7 +247,7 @@ enum ConfigAPI {
         guard let url = try? makeURL(path: "/api/v1/developer-token") else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        guard let (_, httpResponse) = try? await PortalHTTP.send(request) else {
+        guard let (_, httpResponse) = try? await GatewayHTTP.send(request) else {
             return false
         }
         return httpResponse.statusCode == 200
@@ -218,10 +266,12 @@ enum ConfigAPI {
     }
 
     private static func send(_ request: URLRequest) async throws -> ConfigResponse {
-        // 走 PortalHTTP：它续 token、401 后重试一次，并把 403 的 pending_approval
-        // 翻成人话。这两个端点在门户策略表里是 **admin only**，所以普通用户会拿到
-        // 403 forbidden——那是正确行为，不是 bug。
-        let (data, httpResponse) = try await PortalHTTP.send(request)
+        // 走 GatewayHTTP：它负责带上凭据，并把 401 翻成"要重新登录"。
+        //
+        // 这两个端点以前在门户策略表里是 **admin only**，普通用户拿 403 是正确
+        // 行为。现在没有角色了，签了名就能改——这是进程级的配置，而进程是这一个
+        // 人的。
+        let (data, httpResponse) = try await GatewayHTTP.send(request)
         guard httpResponse.statusCode == 200 else {
             throw DownloadsAPI.serverError(status: httpResponse.statusCode, data: data)
         }
@@ -234,6 +284,14 @@ enum ConfigAPI {
             result.config.download = download
         }
         return result
+    }
+}
+
+private enum MediaUserTokenConfigError: LocalizedError {
+    case emptyToken
+
+    var errorDescription: String? {
+        "Music-User-Token 为空，未更新后端配置。"
     }
 }
 

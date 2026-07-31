@@ -38,6 +38,57 @@ Concrete invariants worth knowing before you touch them:
 
 Prefer making a caller `async` over spawning an unstructured `Task`.
 
+## Auth: the credential is Apple's own token, and it cannot be renewed
+
+`GatewayAuth.swift` is the whole of it. The app signs in natively, keeps the
+Apple identity token, and sends **that token itself** as
+`Authorization: Bearer` — the gatehouse (oauth2-proxy behind nginx) verifies it
+against Apple's JWKS and checks an email allow-list. It issues nothing of its
+own and does not report who the caller is, because there is one user and
+nothing downstream has anywhere to put a name.
+
+**There is no silent way to mint another Apple identity token** —
+`getCredentialState` reports that the authorization still stands, it does not
+issue a token. So the app re-prompts when the current one expires. That is a
+known, accepted cost, not a bug to fix here:
+
+**Do not write a lifetime into any comment or any string.** The repo said "about
+24 hours", someone "corrected" it to "about 10 minutes" as an observation error,
+and the 10 minutes then propagated into four documents and one user-facing
+label. Reading `exp` off the real token on 2026-07-30 gave **~23.4 hours** — the
+"correction" was the error. The code parses `exp` precisely so nobody has to
+believe a number in a comment; leave it that way.
+
+- `amdl-portal` existed to remove it (identity token → its own access/refresh
+  pair, 1 hour / 60 days). The portal was deleted when the system went back to
+  single-user, and the cost came back with it.
+- The only real fix is a **server** that mints a durable token, which is a
+  server-side session however thin you write it. Don't try to work around it in
+  the app — the one thing you could do here is keep the token longer, which just
+  sends a credential that is certain to be refused.
+- So `GatewayHTTP` has no refresh and no 401 retry. A 401 throws
+  `needsSignIn` and the UI asks. `isSignedIn` checks the credential is still
+  *usable*, not just present — otherwise the UI would claim you are signed in
+  while every request 401s.
+
+The 10-minute fallback in `GatewayCredential.init` is a deliberately pessimistic
+floor for an unparsable token, **not** an estimate of the real lifetime.
+
+The credential lives in the **Keychain** (`GatewayCredentialStore`), access
+group = the App Group id, `AfterFirstUnlock` so the notification extension can
+read it on a locked screen. `ShareViewController` hand-copies the decoder
+because extensions can't see the main target — `identityToken` and `expiresAt`
+are a **cross-target contract**, and a test pins them.
+
+Two things a startup path still cleans up: the plaintext identity token an old
+build left in the App Group's UserDefaults, and the portal's 60-day refresh
+token in the `com.lyjw131.amdl.portal` Keychain item. Both issuers are gone.
+
+**`BackendEndpoint`'s "portal" names are deliberate leftovers.** The host name
+is injected at build time from `AMDL_PORTAL_HOST` (`Config/Portal.xcconfig`,
+not in the repo), and renaming that key would silently empty a user's local
+config — it compiles, installs, and never connects. The file says so at the top.
+
 ## Don't reach for MusicKit to fill gaps in the job
 
 Animated album covers are the cautionary tale. `editorialVideo` is not available

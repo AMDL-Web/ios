@@ -11,6 +11,7 @@ import UserNotifications
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
 
     private var pushTokenTask: Task<Void, Never>?
+    private var mediaUserTokenRefreshTask: Task<Void, Never>?
 
     func application(
         _ application: UIApplication,
@@ -52,10 +53,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             await DownloadLiveActivityManager.shared.reconcileWithGateway()
         }
         // 分享扩展问不到 MusicKit，只能读主 App 抄进钥匙串的那份 media user token。
-        // 每次进前台刷新一次，「装上 App 之后只用分享面板」的用法才拿得到令牌。
-        // 和上面那次对账分开起 Task：网关不通时它会卡住好几秒，令牌刷新不该陪等。
-        Task { @MainActor in
-            await AppleMusicTokenService.refreshSharedToken()
+        // 每次进前台刷新一次；若用户开启了后端自动同步，同一次刷新还会把最新值写入
+        // 后端 config.yaml。和上面那次对账分开起 Task：网关不通时它会卡住好几秒，
+        // 令牌刷新不该陪等。
+        mediaUserTokenRefreshTask?.cancel()
+        mediaUserTokenRefreshTask = Task { @MainActor in
+            await AppleMusicTokenService.refreshForAppActivation()
         }
     }
 
@@ -117,10 +120,33 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) async {
         let userInfo = response.notification.request.content.userInfo
         print("[Push] 用户点击通知: \(userInfo)")
+
         guard let jobID = Self.jobID(fromNotificationUserInfo: userInfo) else { return }
-        // 只登记目标，导航由 ContentView 做：这个回调在冷启动时比根视图还早，
-        // 直接推路径没人接得住。
-        PendingDownloadRoute.shared.route(toJob: jobID)
+        // 只登记目标，导航和「拉起 Emby」都由 ContentView 做：这个回调在冷启动时
+        // 比根视图还早，那时本 App 自己都还没 active —— 直接推路径没人接得住，
+        // 直接 UIApplication.open 也会被系统忽略，通知只会把自己打开而已。
+        PendingDownloadRoute.shared.route(
+            toJob: jobID,
+            emby: Self.embyDeepLink(fromNotificationUserInfo: userInfo)
+        )
+    }
+
+    /// 网关在专辑任务完成时放进 payload 的 `emby_deep_link`
+    /// （amdl-ios-gateway `alertPayload`），形如
+    /// `emby://items?serverId=<id>&itemId=<id>`。
+    ///
+    /// 只认 `emby` 这一个 scheme：这个值来自推送负载，照单全收就等于让任何能发到
+    /// 这台设备的推送指定一个要打开的 URL。
+    static func embyDeepLink(fromNotificationUserInfo userInfo: [AnyHashable: Any]) -> URL? {
+        guard let raw = userInfo["emby_deep_link"] as? String else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let url = URL(string: trimmed),
+              url.scheme?.lowercased() == "emby"
+        else {
+            return nil
+        }
+        return url
     }
 
     /// 网关的完成通知在 payload 顶层带 `job_id`（amdl-ios-gateway `alertPayload`），

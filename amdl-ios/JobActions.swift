@@ -120,7 +120,7 @@ enum JobActionOutcome: Equatable, Sendable {
 /// 任务管理动作失败时给用户看的错误。
 ///
 /// 为什么不直接用 `DownloadsAPIError.server`：`/api/v1/*` 的错误体是后端原本的
-/// `{"error": "..."}`，而 `PortalErrorBody.resolvedMessage` 读的是
+/// `{"error": "..."}`，而 `GatewayErrorBody.resolvedMessage` 读的是
 /// `detail/message/title` —— 这三个字段在这个形状里一个都没有，于是
 /// `errorDescription` 每次都退化成「服务器错误 (409)」。就算把 `error` 直接当消息
 /// 显示也不行，那里装的可能是 `sql: no rows in result set`（后端 `GET` 404 的原文）。

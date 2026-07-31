@@ -8,6 +8,10 @@ import UIKit
 
 @MainActor
 enum JobArtworkLoader {
+    /// 概览列表那档尺寸。行里的槽位只有 56pt，但两个页面各存各的一份，所以它
+    /// 同时是一个缓存 key 的组成部分 —— 改动它会让所有已缓存的列表封面失效。
+    static let overviewPixelSize = 256
+
     /// 与详情页 Hero 封面一致：按显示原生像素的 2 倍请求并缓存大图。
     static var heroPixelSize: Int {
         let windowScenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
@@ -27,6 +31,24 @@ enum JobArtworkLoader {
             return "artwork:\(template):\(pixelSize)"
         }
         return ""
+    }
+
+    /// 本尺寸还没到位时可以先顶上的另一档尺寸的 key，没有可借的就是 nil。
+    ///
+    /// **两个方向都要**：
+    ///
+    /// - 概览 → 详情：大图还在下，先用列表里那张小的，免得 zoom 转场结束后短暂
+    ///   或永久露出任务类型占位图。
+    /// - 详情 → 概览：分享拓展和完成通知都是 `amdl://download/<id>` 深链，直接把
+    ///   详情页压进导航栈，概览列表一次都没出现过 —— 那张 256 于是从来没人取过。
+    ///   退回列表时若不借详情页已经下好的大图，就得从占位图重新等一次。
+    ///
+    /// 私人歌单两边共用一个不带尺寸的 key，两次算出来是同一个，这里返回 nil，
+    /// 不会自己借自己。
+    static func fallbackCacheKey(for job: Job, pixelSize: Int) -> String? {
+        let otherPixelSize = pixelSize == overviewPixelSize ? heroPixelSize : overviewPixelSize
+        let otherKey = cacheKey(for: job, pixelSize: otherPixelSize)
+        return otherKey == cacheKey(for: job, pixelSize: pixelSize) ? nil : otherKey
     }
 
     static func prefetch(job: Job, pixelSize: Int) async {
@@ -49,7 +71,7 @@ enum JobArtworkLoader {
 /// 其他任务直接使用后端的 artwork_url。
 struct JobArtworkView: View {
     let job: Job
-    var pixelSize: Int = 256
+    var pixelSize: Int = JobArtworkLoader.overviewPixelSize
 
     @State private var fallbackURL: URL?
     @State private var artworkRevision = 0
@@ -70,11 +92,8 @@ struct JobArtworkView: View {
         JobArtworkLoader.cacheKey(for: job, pixelSize: pixelSize)
     }
 
-    /// 详情大图尚未准备好时先复用概览封面的缓存，避免 zoom 动画结束后
-    /// 短暂或永久露出任务类型占位图。
     private var fallbackCacheKey: String? {
-        let overviewKey = JobArtworkLoader.cacheKey(for: job, pixelSize: 256)
-        return overviewKey == cacheKey ? nil : overviewKey
+        JobArtworkLoader.fallbackCacheKey(for: job, pixelSize: pixelSize)
     }
 
     var body: some View {

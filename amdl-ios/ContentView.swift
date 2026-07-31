@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
 
 private enum AppTab: Hashable {
     case home
@@ -28,15 +29,23 @@ final class PendingDownloadRoute {
 
     private(set) var jobID: String?
 
+    /// 专辑完成通知带的 Emby 深链，和 `jobID` 一起登记、一起等根视图。
+    ///
+    /// 拉起别的 App 和改导航状态受同一条限制：`didReceive` 跑在本 App 还没 active
+    /// 的时候，那时 `UIApplication.open` 会被系统忽略，通知照样只是把自己打开。
+    /// 所以这里也只登记，真正 open 由根视图在能动的时候做，打不开再退回 `jobID`。
+    private(set) var embyURL: URL?
+
     private init() {}
 
-    func route(toJob jobID: String) {
+    func route(toJob jobID: String, emby: URL? = nil) {
         self.jobID = jobID
+        self.embyURL = emby
     }
 
     /// 取走并清空，所以同一次点击只会导航一次。
     func take() -> String? {
-        defer { jobID = nil }
+        defer { jobID = nil; embyURL = nil }
         return jobID
     }
 }
@@ -68,8 +77,19 @@ struct ContentView: View {
         // `initial: true` 是冷启动那一半：点击早于本视图时值已经在里面了，光等
         // 变化永远等不到。热启动走的是 `@Observable` 的变化通知。
         .onChange(of: pendingRoute.jobID, initial: true) { _, _ in
+            // Emby 优先：这条通知说的专辑此刻在 Emby 里点得开，网关是先确认过
+            // 才发的。打不开（多半是没装 Emby）再退回应用内详情页 —— 所以这里
+            // 先把 URL 取走，`take()` 才不会连着它一起清掉。
+            let emby = pendingRoute.embyURL
             guard let jobID = pendingRoute.take() else { return }
-            showDownloads(jobID: jobID)
+            guard let emby else {
+                showDownloads(jobID: jobID)
+                return
+            }
+            Task {
+                if await UIApplication.shared.open(emby) { return }
+                showDownloads(jobID: jobID)
+            }
         }
     }
 

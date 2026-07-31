@@ -75,6 +75,53 @@ struct amdl_iosTests {
         try assert(small.imageCacheKey != large.imageCacheKey, "template image cache should retain size")
     }
 
+    /// 概览和详情各存各的尺寸，所以谁先拿到图，另一边都得能先借来顶上。
+    ///
+    /// 借的方向以前只有一个：详情借概览。分享拓展和完成通知走 `amdl://download/<id>`
+    /// 深链直接进详情页，概览列表压根没出现过，那张 256 从来没人取过 —— 退回列表
+    /// 时没得借，就得从占位图重新等一次。
+    @Test @MainActor func artworkFallsBackBetweenOverviewAndHeroSizes() throws {
+        let job = try DownloadsAPI.decodeDownloadDetail(from: """
+        {
+          "job": {
+            "id": "job_art", "input": "https://music.apple.com/cn/album/example/1", "type": "album",
+            "force": false, "status": "running", "total_items": 1, "done_items": 0, "failed_items": 0,
+            "artwork_url": "https://is1-ssl.mzstatic.com/image/thumb/x/{w}x{h}bb.jpg",
+            "created_at": "2026-07-30T00:00:00Z", "updated_at": "2026-07-30T00:00:00Z"
+          },
+          "items": []
+        }
+        """.data(using: .utf8)!).job
+
+        let overview = JobArtworkLoader.overviewPixelSize
+        let hero = JobArtworkLoader.heroPixelSize
+        try assert(hero != overview, "hero and overview must be different sizes for this to matter")
+
+        let overviewKey = JobArtworkLoader.cacheKey(for: job, pixelSize: overview)
+        let heroKey = JobArtworkLoader.cacheKey(for: job, pixelSize: hero)
+        try assert(overviewKey != heroKey, "each size caches separately")
+
+        // 详情 → 概览：这一条以前是 nil，正是深链进来后退回列表要等图的原因。
+        try assert(
+            JobArtworkLoader.fallbackCacheKey(for: job, pixelSize: overview) == heroKey,
+            "overview borrows the hero image"
+        )
+        // 概览 → 详情：原有方向，不能改坏。
+        try assert(
+            JobArtworkLoader.fallbackCacheKey(for: job, pixelSize: hero) == overviewKey,
+            "hero borrows the overview image"
+        )
+
+        // 私人歌单两档尺寸共用一个 key，没有另一份可借，不能自己借自己。
+        let privateJob = privatePlaylistJob(
+            artworkURL: "https://example-bucket.s3.amazonaws.com/cover.jpg?X-Amz-Expires=86400"
+        )
+        try assert(
+            JobArtworkLoader.fallbackCacheKey(for: privateJob, pixelSize: overview) == nil,
+            "a shared cache key has nothing to borrow"
+        )
+    }
+
     @Test func downloadDetailDecodesJobItems() throws {
         let json = """
         {
@@ -165,6 +212,52 @@ struct amdl_iosTests {
         try assert(abs(detail.items[0].clampedProgress - firstItemFraction) < 1e-9, "first item fraction")
         try assert(detail.items[2].clampedProgress == 1, "skipped item reads as complete")
         try assert(abs(detail.progress - (firstItemFraction + 1 + 1) / 3) < 1e-9, "detail progress")
+    }
+
+    /// 曲目一多，最后一首的零头在均值里就摊得看不见了：200 首下完 199 首是 0.995，
+    /// 显示成整数正好是 100% —— 而这时最后一首可能一个字节都还没下。只要还有曲目
+    /// 没走完，这个数就得停在 99%。
+    @Test func detailProgressStaysBelowFullUntilEveryTrackIsDone() throws {
+        func detail(completedTracks: Int, lastTrack status: String) throws -> DownloadDetail {
+            let full = #"{"download": 1, "decrypt": 1, "resolved": true, "remuxed": true, "verified": true, "tagged": true, "saved": true}"#
+            let untouched = #"{"download": 0, "decrypt": 0, "resolved": false, "remuxed": false, "verified": false, "tagged": false, "saved": false}"#
+            let stamps = #""created_at": "2026-07-30T00:00:00Z", "updated_at": "2026-07-30T00:00:00Z""#
+
+            let done = (0..<completedTracks).map { index in
+                """
+                {"id": "item_\(index)", "job_id": "big_job", "adam_id": "\(index)", "kind": "song",
+                 "index": \(index + 1), "status": "completed", "progress": \(full), \(stamps)}
+                """
+            }
+            let last = """
+            {"id": "item_last", "job_id": "big_job", "adam_id": "last", "kind": "song",
+             "index": \(completedTracks + 1), "status": "\(status)",
+             "progress": \(status == "completed" ? full : untouched), \(stamps)}
+            """
+            let allDone = status == "completed"
+            let json = """
+            {
+              "job": {
+                "id": "big_job", "input": "https://music.apple.com/cn/album/1", "type": "album",
+                "force": false, "status": "\(allDone ? "completed" : "running")",
+                "total_items": \(completedTracks + 1),
+                "done_items": \(allDone ? completedTracks + 1 : completedTracks), "failed_items": 0,
+                \(stamps)
+              },
+              "items": [\((done + [last]).joined(separator: ","))]
+            }
+            """.data(using: .utf8)!
+            return try DownloadsAPI.decodeDownloadDetail(from: json)
+        }
+
+        // 199/200 还没动最后一首：原始均值 0.995，四舍五入就是 100%。
+        let almost = try detail(completedTracks: 199, lastTrack: "queued")
+        try assert(almost.progress > 0.9, "199/200 is still nearly done")
+        try assert(almost.progress <= 0.99, "199/200 must not round up to 100%")
+
+        // 最后一首也走完了才允许报满。
+        let finished = try detail(completedTracks: 199, lastTrack: "completed")
+        try assert(finished.progress == 1, "every track done reads as 100%")
     }
 
     @Test func trackDurationSummaryFormatsAdaptiveUnits() throws {
@@ -998,6 +1091,40 @@ struct amdl_iosTests {
         )
     }
 
+    /// 通知里的 Emby 链接来自推送负载，所以它是外部输入。只认 emby 这一个
+    /// scheme —— 照单全收就等于让任何能发到这台设备的推送指定一个要打开的 URL。
+    @Test func embyDeepLinkAcceptsOnlyTheEmbyScheme() throws {
+        let good = try #require(AppDelegate.embyDeepLink(
+            fromNotificationUserInfo: ["emby_deep_link": "emby://items?serverId=srv-1&itemId=item-42"]
+        ))
+        try assert(good.scheme == "emby", "emby scheme is accepted")
+        try assert(good.absoluteString.contains("itemId=item-42"), "item id survives")
+
+        for rejected in [
+            "https://evil.example/steal",
+            "javascript:alert(1)",
+            "amdl://download/job_1",
+            "   ",
+            "",
+        ] {
+            try assert(
+                AppDelegate.embyDeepLink(fromNotificationUserInfo: ["emby_deep_link": rejected]) == nil,
+                "rejects \(rejected)"
+            )
+        }
+
+        // 没有这个键就是常态：非专辑任务、没配 Emby、扫描没跟上都走这一支。
+        try assert(
+            AppDelegate.embyDeepLink(fromNotificationUserInfo: ["job_id": "job_1"]) == nil,
+            "absent key is not an error"
+        )
+        // 退回路由的依据必须还在。
+        try assert(
+            AppDelegate.jobID(fromNotificationUserInfo: ["job_id": "job_1"]) == "job_1",
+            "job_id still routes in-app"
+        )
+    }
+
     private func assert(_ condition: Bool, _ message: String) throws {
         if !condition {
             throw TestFailure(message: message)
@@ -1046,7 +1173,7 @@ struct amdl_iosTests {
 // MARK: - amdl-portal 会话（Milestone 7）
 
 @MainActor
-struct PortalAuthTests {
+struct GatewayAuthTests {
 
     /// 三条链路只剩一个可配置的地址。
     ///
@@ -1222,84 +1349,97 @@ struct PortalAuthTests {
         #expect(!AppleAuthCredentialStore.isGatewayHost("\(host).evil.example"))
     }
 
-    /// 两种错误体形状、同一张码表（DESIGN.md §6.3）。
-    ///
-    /// `/api/gw/*` 是 problem+json，机器码在 `code`；`/api/v1/*` 保持后端的
-    /// `{"error":...}`。客户端只该有一份码表，所以两种都得解得出同一个结论。
-    @Test func pendingApprovalIsRecognisedInBothErrorShapes() throws {
-        let problemJSON = Data(#"""
-        {"type":"about:blank","title":"Forbidden","status":403,
-         "detail":"this account is awaiting approval","code":"pending_approval"}
-        """#.utf8)
-        let mirrorJSON = Data(#"{"error":"pending_approval"}"#.utf8)
-
-        for body in [problemJSON, mirrorJSON] {
-            let decoded = try #require(PortalErrorBody.decode(from: body))
-            #expect(decoded.resolvedCode == "pending_approval")
-            guard case .pendingApproval = try #require(decoded.authError(status: 403)) else {
-                Issue.record("403 pending_approval 没有被识别出来")
-                return
-            }
+    /// 401 是唯一还带着"下一步该做什么"的拒绝，所以它必须被认出来，而不是变成
+    /// 一句「服务器错误 (401)」。网关的 401 body 特意用后端那个 `{"error":...}`
+    /// 形状，就是为了让客户端只需要一份解码器。
+    @Test func unauthenticatedIsRecognisedFromTheErrorBody() throws {
+        let decoded = try #require(
+            GatewayErrorBody.decode(from: Data(#"{"error":"unauthenticated"}"#.utf8))
+        )
+        #expect(decoded.resolvedCode == "unauthenticated")
+        guard case .needsSignIn = try #require(decoded.authError(status: 401)) else {
+            Issue.record("401 unauthenticated 没有被识别出来")
+            return
         }
-    }
-
-    /// 「等待批准」必须是一句人话。**每个新用户第一次进来看到的就是它**：门户给
-    /// pending 账号也发凭据（好让 App 能调 /api/gw/me 问出自己的状态），别的接口
-    /// 一律 403 —— 如果这里只剩「服务器错误 (403)」，用户唯一能得出的结论是登录坏了。
-    @Test func pendingApprovalHasAComprehensibleMessage() throws {
-        let message = try #require(PortalAuthError.pendingApproval.errorDescription)
-        #expect(message.contains("批准"))
-        #expect(!message.contains("403"))
-        #expect(!message.contains("error"))
-
-        // 停用和登录过期同理：都要说清楚下一步该做什么。
-        #expect(try #require(PortalAuthError.suspended.errorDescription).contains("停用"))
-        #expect(try #require(PortalAuthError.needsSignIn.errorDescription).contains("登录"))
     }
 
     /// 未知的错误码不许被当成认证问题吞掉——那会把一个真的服务器故障显示成
     /// 「请重新登录」，然后用户反复登录也没用。
     @Test func unknownCodesAreNotTreatedAsAuthErrors() throws {
-        let decoded = try #require(PortalErrorBody.decode(from: Data(#"{"error":"queue_full"}"#.utf8)))
+        let decoded = try #require(
+            GatewayErrorBody.decode(from: Data(#"{"error":"queue_full"}"#.utf8))
+        )
         #expect(decoded.authError(status: 422) == nil)
     }
 
-    /// access token 的可用性判断留了余量：卡着到期时刻发出去的请求会在路上过期，
-    /// 白跑一趟 401。
-    @Test func accessTokenNeedsHeadroomBeforeExpiry() {
-        let almostExpired = PortalCredentials(
-            accessToken: "a", refreshToken: "r",
-            accessTokenExpiresAt: Date().addingTimeInterval(30)
-        )
-        let fresh = PortalCredentials(
-            accessToken: "a", refreshToken: "r",
-            accessTokenExpiresAt: Date().addingTimeInterval(3600)
-        )
-        #expect(!almostExpired.isAccessTokenUsable)
-        #expect(fresh.isAccessTokenUsable)
+    /// 「登录已过期」必须是一句人话，而且要说清楚下一步。**用户会经常看到它** ——
+    /// Apple 的 identity token 只活约十分钟且无法静默续期，所以过期是常态。
+    @Test func needsSignInHasAComprehensibleMessage() throws {
+        let message = try #require(GatewayAuthError.needsSignIn.errorDescription)
+        #expect(message.contains("登录"))
+        #expect(!message.contains("401"))
+        #expect(!message.contains("error"))
     }
 
-    /// 凭据的编码形状是**跨 target 的契约**：`PortalCredentialStore` 在主 App
-    /// target 里，分享扩展够不着（共享的只有 `LiveActivityShared/`），它自己手抄
-    /// 了一份解码器，只认 `accessToken` 这个键。改字段名会让分享面板静默地不带令牌。
-    @Test func storedCredentialsKeepTheKeyNamesTheExtensionReads() throws {
-        let encoded = try JSONEncoder().encode(PortalCredentials(
-            accessToken: "token-value", refreshToken: "refresh-value",
-            accessTokenExpiresAt: Date()
-        ))
+    /// 凭据的到期时刻是从 token 自己的 `exp` claim 解出来的，不是"收到时间 + 十分钟"。
+    /// 十分钟是实测值不是契约；Apple 改了寿命而这里还按十分钟算，就会带着一个已经
+    /// 失效的凭据出门。
+    @Test func expiryComesFromTheTokenNotTheClock() throws {
+        // exp = 2026-07-30T12:00:00Z。header 和签名都是占位符：这里只解 payload，
+        // 验签是网关的事。
+        let exp = 1_785_585_600.0
+        let payload = try JSONSerialization.data(withJSONObject: ["exp": exp, "aud": "com.example.app"])
+        let base64url = payload.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let token = "eyJhbGciOiJSUzI1NiJ9.\(base64url).signature"
+
+        let parsed = try #require(GatewayCredential.expiry(ofJWT: token))
+        #expect(abs(parsed.timeIntervalSince1970 - exp) < 1)
+    }
+
+    /// 解不出 `exp` 时按十分钟兜底，而不是当成"永不过期"。一个不会过期的凭据会让
+    /// App 永远不提示重新登录，而每个请求都 401。
+    @Test func unparsableTokenFallsBackToTenMinutes() {
+        let received = Date()
+        for junk in ["", "not-a-jwt", "a.b", "a.!!!.c"] {
+            let credential = GatewayCredential(identityToken: junk, receivedAt: received)
+            #expect(abs(credential.expiresAt.timeIntervalSince(received) - 600) < 1)
+        }
+    }
+
+    /// 可用性判断留了余量：卡着到期时刻发出去的请求会在路上过期，白跑一趟 401。
+    @Test func credentialNeedsHeadroomBeforeExpiry() {
+        // 直接构造，绕开 init 里的 JWT 解析 —— 这里测的是余量，不是解析。
+        let almostExpired = GatewayCredential(identityToken: "x", receivedAt: Date().addingTimeInterval(-590))
+        let fresh = GatewayCredential(identityToken: "x", receivedAt: Date())
+        #expect(!almostExpired.isUsable)
+        #expect(fresh.isUsable)
+    }
+
+    /// 凭据的编码形状是**跨 target 的契约**：`GatewayCredentialStore` 在主 App
+    /// target 里，分享扩展够不着（共享的只有 `LiveActivityShared/`），它自己手抄了
+    /// 一份解码器，只认 `identityToken` 和 `expiresAt` 这两个键。改字段名会让分享
+    /// 面板静默地不带令牌 —— 提交会 401，而分享面板是个一闪而过的浮层，最难查。
+    @Test func storedCredentialKeepsTheKeyNamesTheExtensionReads() throws {
+        let encoded = try JSONEncoder().encode(GatewayCredential(identityToken: "token-value"))
         let object = try #require(
             try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
-        #expect(object["accessToken"] as? String == "token-value")
-        #expect(object["refreshToken"] as? String == "refresh-value")
+        #expect(object["identityToken"] as? String == "token-value")
+        #expect(object["expiresAt"] != nil)
+        // 扩展用默认的 JSONDecoder 解 `expiresAt`，所以编码策略必须是默认的
+        // .deferredToDate（自参考日期起的秒数），不能是 ISO8601 字符串。
+        #expect(object["expiresAt"] is Double)
     }
 
     /// Keychain 的 access group 用的是 App Group id。四个 target 的 entitlements
     /// 里已经都有它，所以共享凭据**不需要新增任何 entitlement**——这一点值得钉住，
     /// 因为改 entitlement 要重新配 provisioning。
     @Test func keychainAccessGroupIsTheExistingAppGroup() {
-        #expect(PortalCredentialStore.accessGroup == DownloadsAPI.appGroupIdentifier)
-        #expect(PortalCredentialStore.accessGroup == "group.com.lyjw131.amdl.amdl-ios")
+        #expect(GatewayCredentialStore.accessGroup == DownloadsAPI.appGroupIdentifier)
+        #expect(GatewayCredentialStore.accessGroup == "group.com.lyjw131.amdl.amdl-ios")
     }
 
 }
@@ -1426,12 +1566,12 @@ struct JobActionTests {
 
     /// 认证类错误本来就有人话，不许被动作层的措辞盖掉。
     @Test func authErrorsPassThroughTheActionMapper() throws {
-        let mapped = JobActionError.mapping(PortalAuthError.pendingApproval, action: .delete)
-        guard case PortalAuthError.pendingApproval = mapped else {
+        let mapped = JobActionError.mapping(GatewayAuthError.needsSignIn, action: .delete)
+        guard case GatewayAuthError.needsSignIn = mapped else {
             Issue.record("认证错误被动作层改写了：\(mapped)")
             return
         }
-        #expect(mapped.localizedDescription.contains("等待管理员批准"))
+        #expect(mapped.localizedDescription.contains("重新"))
     }
 }
 
