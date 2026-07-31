@@ -188,6 +188,32 @@ enum ConfigAPI {
         return try await send(request)
     }
 
+    /// 只更新后端的全局 media-user-token fallback。
+    ///
+    /// 这是自动同步路径使用的最小 patch；其余 catalog 键和整个 download/logging/
+    /// simulate 段都必须省略，不能拿配置页可能已经过时的整份表单覆盖后端。
+    static func updateMediaUserToken(_ token: String) async throws -> ConfigResponse {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw MediaUserTokenConfigError.emptyToken
+        }
+        return try await updateConfig(mediaUserTokenPatch(trimmed))
+    }
+
+    /// 纯函数，既固定部分更新的 JSON 形状，也让测试不需要真的访问后端。
+    static func mediaUserTokenPatch(_ token: String) -> RuntimeConfig {
+        RuntimeConfig(
+            catalog: CatalogConfig(
+                albumTrackURLMode: nil,
+                mediaUserToken: token,
+                signedModeHLSSource: nil
+            ),
+            download: nil,
+            logging: nil,
+            simulate: nil
+        )
+    }
+
     /// 探测后端是否处于「本地签名开发者 token」模式。
     ///
     /// 后端没有直接暴露这个状态：catalog.apple_music_private_key_path / key_id /
@@ -236,6 +262,14 @@ enum ConfigAPI {
             result.config.download = download
         }
         return result
+    }
+}
+
+private enum MediaUserTokenConfigError: LocalizedError {
+    case emptyToken
+
+    var errorDescription: String? {
+        "Music-User-Token 为空，未更新后端配置。"
     }
 }
 

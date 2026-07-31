@@ -117,6 +117,43 @@ import Foundation
         #expect(overrides["media_user_token"] as? String == "user-token")
     }
 
+    // MARK: - 后端配置自动同步
+
+    @Test @MainActor func backendSyncPatchOnlyContainsMediaUserToken() throws {
+        let body = try JSONEncoder().encode(
+            ConfigAPI.mediaUserTokenPatch("user-token")
+        )
+        let json = try #require(
+            try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        #expect(json.keys.sorted() == ["catalog"])
+
+        let catalog = try #require(json["catalog"] as? [String: Any])
+        #expect(catalog.keys.sorted() == ["media_user_token"])
+        #expect(catalog["media_user_token"] as? String == "user-token")
+    }
+
+    @Test @MainActor func regularConfigSaveNeverOverwritesMediaUserToken() throws {
+        let remote = RuntimeConfig(
+            catalog: CatalogConfig(
+                albumTrackURLMode: "song",
+                mediaUserToken: "remote-token",
+                signedModeHLSSource: "wrapper"
+            ),
+            download: nil,
+            logging: nil,
+            simulate: nil
+        )
+        let body = try JSONEncoder().encode(
+            ConfigForm(config: remote).toRuntimeConfig()
+        )
+        let json = try #require(
+            try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        let catalog = try #require(json["catalog"] as? [String: Any])
+        #expect(catalog["media_user_token"] == nil)
+    }
+
     // MARK: - 新旧判定
 
     @Test func freshTokenIsUsable() {

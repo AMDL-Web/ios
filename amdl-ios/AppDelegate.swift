@@ -11,6 +11,7 @@ import UserNotifications
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
 
     private var pushTokenTask: Task<Void, Never>?
+    private var mediaUserTokenRefreshTask: Task<Void, Never>?
 
     func application(
         _ application: UIApplication,
@@ -52,10 +53,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             await DownloadLiveActivityManager.shared.reconcileWithGateway()
         }
         // 分享扩展问不到 MusicKit，只能读主 App 抄进钥匙串的那份 media user token。
-        // 每次进前台刷新一次，「装上 App 之后只用分享面板」的用法才拿得到令牌。
-        // 和上面那次对账分开起 Task：网关不通时它会卡住好几秒，令牌刷新不该陪等。
-        Task { @MainActor in
-            await AppleMusicTokenService.refreshSharedToken()
+        // 每次进前台刷新一次；若用户开启了后端自动同步，同一次刷新还会把最新值写入
+        // 后端 config.yaml。和上面那次对账分开起 Task：网关不通时它会卡住好几秒，
+        // 令牌刷新不该陪等。
+        mediaUserTokenRefreshTask?.cancel()
+        mediaUserTokenRefreshTask = Task { @MainActor in
+            await AppleMusicTokenService.refreshForAppActivation()
         }
     }
 

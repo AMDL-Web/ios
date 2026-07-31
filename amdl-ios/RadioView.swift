@@ -481,13 +481,11 @@ private struct SimulatePage: View {
 // MARK: - 表单模型
 
 /// 配置页的可编辑视图模型。字段均为非可选，缺省值取后端 Default()；
-/// 从后端读到的值覆盖缺省，保存时回写为完整 RuntimeConfig。
+/// 从后端读到的值覆盖缺省，保存时回写可编辑配置。media-user-token 由启动同步
+/// 独立管理，不进入这份表单。
 struct ConfigForm: Equatable {
     // catalog
     var albumTrackURLMode = "song"
-    /// App 里不再提供编辑入口，但仍随读取的值原样回写，避免保存时把后端上
-    /// 已配置的 token 清空。
-    var mediaUserToken = ""
     var signedModeHLSSource = "wrapper"
 
     // download
@@ -538,7 +536,6 @@ struct ConfigForm: Equatable {
     init(config: RuntimeConfig) {
         if let c = config.catalog {
             albumTrackURLMode = c.albumTrackURLMode ?? albumTrackURLMode
-            mediaUserToken = c.mediaUserToken ?? mediaUserToken
             signedModeHLSSource = c.signedModeHLSSource ?? signedModeHLSSource
         }
         if let d = config.download {
@@ -604,7 +601,9 @@ struct ConfigForm: Equatable {
         RuntimeConfig(
             catalog: CatalogConfig(
                 albumTrackURLMode: albumTrackURLMode,
-                mediaUserToken: mediaUserToken,
+                // token 由专门的启动同步请求管理。普通配置保存必须省略它，否则页面
+                // 加载时缓存的旧值会在用户改别的设置时把刚同步的新值覆盖回去。
+                mediaUserToken: nil,
                 signedModeHLSSource: signedModeHLSSource
             ),
             download: DownloadConfig(

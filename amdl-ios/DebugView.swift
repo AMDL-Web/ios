@@ -19,6 +19,10 @@ struct DebugView: View {
     @State private var musicUserToken = ""
     @State private var errorMessage: String?
     @State private var isRequestingAuthorization = false
+    @State private var isSyncingMediaUserToken = false
+    @State private var mediaUserTokenSyncMessage: String?
+    @AppStorage(AppleMusicTokenService.syncToBackendOnActivationKey)
+    private var syncMediaUserTokenToBackendOnActivation = false
     /// 抄给分享扩展的那份 media user token。扩展问不到 MusicKit，只能读这份副本，
     /// 所以「分享电台失败」第一个要看的就是它在不在、是什么时候写的。
     @State private var sharedMediaUserToken = MediaUserTokenStore.load()
@@ -123,9 +127,27 @@ struct DebugView: View {
                 Text("「通过 Apple 登录」拿到的身份令牌只用来换一次门户会话，之后请求带的是门户签发的令牌：有效期 1 小时，过期自动续，续期凭证 60 天，所以正常情况下不需要再回到这里。令牌存在钥匙串里，只会发给门户域名，封面等第三方资源不会带上。")
             }
 
-            Section("Apple Music") {
+            Section {
                 LabeledContent("授权状态", value: authorizationStatusText)
                 LabeledContent("分享扩展副本", value: sharedMediaUserTokenStatusText)
+
+                Toggle(
+                    "打开 App 时同步到后端",
+                    isOn: $syncMediaUserTokenToBackendOnActivation
+                )
+                .disabled(isSyncingMediaUserToken)
+
+                if isSyncingMediaUserToken {
+                    HStack {
+                        Text("正在同步到后端")
+                        Spacer()
+                        ProgressView()
+                    }
+                } else if let mediaUserTokenSyncMessage {
+                    Label(mediaUserTokenSyncMessage, systemImage: "checkmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                }
 
                 Button(action: authorizationButtonTapped) {
                     if isRequestingAuthorization {
@@ -153,6 +175,10 @@ struct DebugView: View {
                         .font(.footnote)
                         .foregroundStyle(.red)
                 }
+            } header: {
+                Text("Apple Music")
+            } footer: {
+                Text("开启后会立即同步一次；此后每次启动或回到 App，都获取最新 Music-User-Token 并写入后端配置文件。关闭不会清除后端已有令牌。")
             }
 
             Section("缓存") {
@@ -164,6 +190,11 @@ struct DebugView: View {
         .navigationTitle("调试")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: backendBaseURL, initial: false, backendBaseURLChanged)
+        .onChange(
+            of: syncMediaUserTokenToBackendOnActivation,
+            initial: false,
+            syncMediaUserTokenSettingChanged
+        )
         .onAppear {
             appleAuth.refreshFromStore()
             sharedMediaUserToken = MediaUserTokenStore.load()
@@ -206,6 +237,34 @@ struct DebugView: View {
     private func authorizationButtonTapped() {
         Task {
             await requestAppleMusicAuthorization()
+        }
+    }
+
+    private func syncMediaUserTokenSettingChanged(_ oldValue: Bool, _ newValue: Bool) {
+        _ = oldValue
+        guard newValue else {
+            mediaUserTokenSyncMessage = nil
+            return
+        }
+        Task {
+            await syncMediaUserTokenNow()
+        }
+    }
+
+    private func syncMediaUserTokenNow() async {
+        isSyncingMediaUserToken = true
+        mediaUserTokenSyncMessage = nil
+        errorMessage = nil
+        defer {
+            isSyncingMediaUserToken = false
+            sharedMediaUserToken = MediaUserTokenStore.load()
+        }
+
+        do {
+            try await AppleMusicTokenService.syncFreshUserTokenToBackend()
+            mediaUserTokenSyncMessage = "已写入后端配置"
+        } catch {
+            errorMessage = "同步失败：\(error.localizedDescription)"
         }
     }
 
